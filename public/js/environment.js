@@ -844,7 +844,7 @@ export function createWorld(opts = {}) {
 
   // --- tree cover: dense near the valley floor, thinning up the slopes ---
   let planted = 0, attempts = 0;
-  while (planted < 78 && attempts++ < 700) {
+  while (planted < 108 && attempts++ < 950) {
     const ang = rand() * Math.PI * 2;
     const e = 0.86 + Math.pow(rand(), 0.8) * 3.4; // denser near, sparser far
     const { x, z } = spotOnSlope(ang, e);
@@ -868,13 +868,13 @@ export function createWorld(opts = {}) {
     i++;
   }
 
-  // --- houses just off the apron, sitting on the rising ground ---
-  house(-a * 1.35, -b * 1.5, 0.5, 0xd32f2f, 1.85); // red roof
-  house(a * 1.45, -b * 1.3, -0.8, 0x1976d2, 1.65);  // blue roof
-  house(a * 1.3, b * 1.6, 2.4, 0xf57c00, 1.75);     // orange roof
-  house(-a * 1.5, b * 1.3, -0.4, 0x1976d2, 1.55);   // blue roof
+  // --- two cottages near the race; the rest are distant valley homes ---
+  house(-a * 1.35, -b * 1.5, 0.5, 0xd32f2f, 1.85); // red roof, near the start
   house(a * 0.2, -b * 1.95, 0.1, 0x7cb342, 1.7);    // green roof, near the road
-  house(a * 0.6, b * 2.05, 3.0, 0xf57c00, 1.55);    // orange roof, south-east
+  house(a * 2.6, -b * 2.6, -0.8, 0x1976d2, 1.65);  // distant blue roof
+  house(a * 2.35, b * 2.5, 2.4, 0xf57c00, 1.75);   // distant orange roof
+  house(-a * 2.7, b * 2.2, -0.4, 0x1976d2, 1.55); // distant blue roof
+  house(a * 1.3, b * 3.1, 3.0, 0xf57c00, 1.55);    // distant orange roof
 
   // --- fence arcs near the track ---
   fenceArc(0, 0, -0.35, 0.45, outerA + 3.5, 7);
@@ -888,7 +888,7 @@ export function createWorld(opts = {}) {
   }
 
   // --- farm animals grazing around the larger houses ---
-  for (let i = 0, tries = 0; i < 7 && tries < 80; tries++) {
+  for (let i = 0, tries = 0; i < 14 && tries < 160; tries++) {
     const ang = rand() * Math.PI * 2;
     const e = 1.25 + rand() * 1.15;
     const { x, z } = spotOnSlope(ang, e);
