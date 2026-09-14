@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Mobu Race</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="ui">
+
+    <!-- Join screen -->
+    <div id="join" class="overlay panel">
+      <h1 id="logo">MOBU RACE 🦆</h1>
+      <p id="subtitle">A giant-lipped racing spectacle</p>
+      <input id="nameInput" type="text" maxlength="20" placeholder="Your screen name" autocomplete="off" />
+      <button id="joinBtn" class="btn-green">Join the racecourse</button>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+
+      <div id="topbar" class="panel small">
+        <span id="roleBadge">Watching: …</span>
+      </div>
+
+      <div id="userPanel" class="panel">
+        <h3>Spectators</h3>
+        <ul id="userList"></ul>
+
+        <div id="setupPanel" class="hidden">
+          <textarea id="namesInput" rows="6" placeholder="One racer name per line"></textarea>
+          <label for="timeInput">Race seconds (track length)</label>
+          <select id="timeInput">
+            <option value="10">10s — sprint loop</option>
+            <option value="20">20s — short track</option>
+            <option value="30">30s — small track</option>
+            <option value="60" selected>60s — full track</option>
+            <option value="90">90s — long track</option>
+            <option value="120">120s — marathon loop</option>
+          </select>
+          <button id="startBtn" class="btn-green">🏁 Start Race</button>
+        </div>
+
+        <div id="waitingPanel">
+          <p>Waiting for the host to set up the race…</p>
+          <p id="setupInfo">0 racers signed up</p>
+        </div>
+      </div>
+
+      <div id="camPanel" class="panel small">
+        <label>Camera</label>
+        <div class="cam-row">
+          <button id="cam-chase"  class="cam-btn active" data-cam="chase">Chase</button>
+          <button id="cam-front"  class="cam-btn" data-cam="front">Front</button>
+          <button id="cam-high"   class="cam-btn" data-cam="high">High</button>
+          <button id="cam-orbit"  class="cam-btn" data-cam="orbit">Orbit</button>
+        </div>
+        <p class="hint">Drag = rotate · Wheel = zoom — works in every camera</p>
+      </div>
+
+      <div id="raceHud" class="hidden">
+        <div id="timer" class="panel big">0.0</div>
+        <div id="leaderboard" class="panel small">
+          <h3>Leaderboard</h3>
+          <ol id="lbList"></ol>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Countdown -->
+    <div id="countdown" class="overlay big hidden">3</div>
+
+    <!-- Results -->
+    <div id="results" class="overlay panel hidden">
+      <h2 id="winnerTitle">🏆 Winner!</h2>
+      <ol id="resultList"></ol>
+      <button id="backBtn" class="btn-green hidden">Back to paddock</button>
+      <p id="resultWaiting" class="hidden">Waiting for host…</p>
+    </div>
+
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

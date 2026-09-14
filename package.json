@@ -1,0 +1,22 @@
+{
+  "name": "mobu-race.git",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node tests/ws-test.mjs",
+    "start": "node server/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "express": "^5.2.1",
+    "three": "^0.186.0",
+    "ws": "^8.21.3"
+  }
+}

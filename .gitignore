@@ -1,0 +1,24 @@
+TODO.md
+
+node_modules/
+
+bin/
+main
+.env
+.env.*
+!.env.example
+tmp/
+*.log
+coverage.out
+k8s.yaml
+*.jsonl
+!internal/transcript/testdata/*.jsonl
+.DS_Store
+
+# Local OAuth credential dumps
+*oauth.json
+
+# Local-only agent config
+__pycache__
+
+
