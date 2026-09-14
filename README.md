@@ -7,14 +7,14 @@ as spectators in a cozy, tree-top-view world.
 ## Run
 
 ```bash
-npm install
-npm start          # serves on http://localhost:3000
+pnpm install
+pnpm start          # serves on http://localhost:3000
 ```
 
 Open http://localhost:3000 in one tab per participant. Tests:
 
 ```bash
-npm test           # WebSocket protocol / race-logic integration test
+pnpm test           # WebSocket protocol / race-logic integration test
 node tests/plan-check.mjs   # statistical check of pack pacing, drama, no stalls
 ```
 
