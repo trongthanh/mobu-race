@@ -1,0 +1,61 @@
+# AGENTS.md — Mobu Race
+
+Real-time multiplayer 3D race game: chubby "mobu" characters race around a procedural
+cozy-countryside oval track while connected visitors watch as avatars. Three.js client
+(vendored, no bundler) + Node/express/ws authoritative server. First visitor is host and
+runs a two-step setup (create race → start race). See README.md for the current flow and
+PLAN.md for the original brief.
+
+## Commands
+
+- `pnpm install` — pnpm exclusively (no npm/yarn).
+- `pnpm start` — serve on http://localhost:3000 (`PORT` env to override).
+- `pnpm test` — `tests/ws-test.mjs`: end-to-end WS protocol test (host flow, plan
+  validity, leader drama, results). Update it whenever server messages/state change.
+- `node tests/plan-check.mjs` — statistical check of race-plan pacing (imports
+  `buildPlan` from the server; keep that export intact).
+
+## Layout
+
+- `server/index.js` — everything server-side: host role, state machine
+  (`idle | ready | countdown | racing | finished`), `buildPlan` (winner pre-decided, pack
+  paced off one baseline with surge bumps), start slots (random lateral/behind meters).
+- `public/js/main.js` — client: WS handling, race scene, cameras, HUD, localStorage.
+- `public/js/environment.js` — procedural world; `lanePoint(progress, lateral)` takes
+  **meters from the centerline** (lane band is ±4.4; keep racers within ±3.3).
+- `public/js/mobu.js` — procedural mobu/watcher builders + canvas name sprites.
+- `public/js/confetti.js` — winner celebration (dependency-free canvas).
+- `public/vendor/three.module.js` — vendored Three.js; clients load plain ES modules from
+  the static `public/` root — there is no build step, don't introduce one.
+
+## Architecture rules
+
+- **Server-authoritative sync**: every client animates the same race from the
+  server-authored plan (`race_start` keyframes `[t, progress]`, linear interpolation).
+  Anything that must look identical across clients (start slots, winner, parking order)
+  derives from plan/server data — never from per-client `Math.random()`. Cosmetic
+  randomness is OK only if it converges (e.g. the anti-overlap sidestep in `tick()`).
+- `progressAt()` exists duplicated in server, client, and plan-check — keep the
+  implementations identical when touching one.
+- Server state machine and message types are asserted by `tests/ws-test.mjs`; the winner
+  screen persists until the host sends `reset` (allowed in `ready` and `finished` only).
+- Racer track position maps plan progress via
+  `dispP = -startFrac + p * (1 + startFrac)` so racers start behind the line and cross
+  exactly on plan time. Finished racers park in arrival order (cooldown parade) and a
+  lateral separation pass keeps mobus from merging.
+- `rebuildWorld(timeSec)` recreates the scene (track scale follows race duration);
+  racers/watchers must be re-added to the new scene afterwards.
+
+## Client conventions
+
+- UI font is Reddit Sans (Google Fonts link) with system-sans fallback; name sprites use
+  the same stack in canvas. Reddit Sans has tall metrics — Chrome gives number inputs a
+  ~40px natural height, so paired controls need explicit equal heights.
+- localStorage keys (all guarded with try/catch): `mobu-race:setup-draft` (names +
+  duration, restored once for a host facing an empty setup) and
+  `mobu-race:visitor-name`.
+- Cozy game aesthetic: cream panels, chunky borders, gold/amber accents — match existing
+  CSS patterns in `public/css/style.css` rather than restyling.
+- WS client auto-reconnects after 1.2s; on host disconnect the server promotes the
+  earliest visitor. Late joiners sync into whatever stage is current via `welcome`
+  payloads (ready/racing/finished all carry enough data to rebuild).
