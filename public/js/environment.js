@@ -229,12 +229,64 @@ export function createWorld(opts = {}) {
   fabric.position.set(-0.25, 3.6, stripeZ);
   fabric.castShadow = true;
   group.add(fabric);
-  const fabricBand = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.3, halfW * 2 + 0.4),
-    stdMat(0xfff4e0)
-  );
-  fabricBand.position.set(-0.19, 3.6, stripeZ);
-  group.add(fabricBand);
+  // banner lettering on both large faces of the fabric (the ±X sides racers
+  // approach from). Canvas texture like the name sprites, justified letter
+  // spacing so the line fills the face; redrawn once Reddit Sans has loaded.
+  const bannerText = 'Mobu Amazing Race';
+  const bFontSize = 100;
+  const bFont = `800 ${bFontSize}px 'Reddit Sans', 'Trebuchet MS', sans-serif`;
+  const bannerTextH = 1.06;
+  const bannerTextW = halfW * 2 + 0.4 - 0.5; // fabric face minus a small margin
+  const bc = document.createElement('canvas');
+  const bctx = bc.getContext('2d');
+  bctx.font = bFont;
+  const bChars = [...bannerText];
+  const bWidths = bChars.map((ch) => bctx.measureText(ch).width);
+  let bAsc = 0, bDesc = 0;
+  for (const ch of bChars) {
+    const m = bctx.measureText(ch);
+    bAsc = Math.max(bAsc, m.actualBoundingBoxAscent ?? bFontSize * 0.75);
+    bDesc = Math.max(bDesc, m.actualBoundingBoxDescent ?? bFontSize * 0.25);
+  }
+  bc.height = Math.ceil(bAsc + bDesc) + 26;
+  bc.width = Math.round(bc.height * (bannerTextW / bannerTextH));
+  const bGap = Math.max(2, (bc.width - 32 - bWidths.reduce((s, w) => s + w, 0)) / (bChars.length - 1));
+  const bTotalW = bWidths.reduce((s, w) => s + w, 0) + bGap * (bChars.length - 1);
+  const bannerTex = new THREE.CanvasTexture(bc);
+  bannerTex.colorSpace = THREE.SRGBColorSpace;
+  bannerTex.anisotropy = 4;
+  function drawBannerText() {
+    bctx.clearRect(0, 0, bc.width, bc.height);
+    bctx.font = bFont;
+    bctx.textAlign = 'left';
+    bctx.textBaseline = 'alphabetic';
+    bctx.lineJoin = 'round';
+    bctx.lineWidth = 11;
+    bctx.strokeStyle = '#5f2a1d';
+    bctx.fillStyle = '#fff4e0';
+    const y = bc.height / 2 + (bAsc - bDesc) / 2;
+    let x = (bc.width - bTotalW) / 2;
+    for (let i = 0; i < bChars.length; i++) {
+      bctx.strokeText(bChars[i], x, y);
+      x += bWidths[i] + bGap;
+    }
+    x = (bc.width - bTotalW) / 2;
+    for (let i = 0; i < bChars.length; i++) {
+      bctx.fillText(bChars[i], x, y);
+      x += bWidths[i] + bGap;
+    }
+    bannerTex.needsUpdate = true;
+  }
+  drawBannerText();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawBannerText);
+  const bannerTextMat = new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true });
+  const bannerTextGeo = new THREE.PlaneGeometry(bannerTextW, bannerTextH);
+  for (const [tx, rotY] of [[-0.195, Math.PI / 2], [-0.305, -Math.PI / 2]]) {
+    const label = new THREE.Mesh(bannerTextGeo, bannerTextMat);
+    label.position.set(tx, 3.6, stripeZ);
+    label.rotation.y = rotY;
+    group.add(label);
+  }
 
   // ---------- scenery ----------
   const rand = mulberry32(42);
