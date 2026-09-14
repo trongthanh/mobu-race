@@ -126,7 +126,7 @@ input:focus, textarea:focus, select:focus { border-color: #58b24a; }
 
 textarea { resize: vertical; min-height: 110px; }
 
-label {
+label, .field-label {
   display: block;
   font-size: 14px;
   color: #8a5a2b;
@@ -197,7 +197,7 @@ label {
 
 #createBtn { margin-top: 10px; }
 
-/* numbered-racer quick generator row */
+/* numbered-racer quick generator row: the count and Generate button stay on one line. */
 .quick-row {
   display: flex;
   align-items: flex-start;
@@ -235,16 +235,17 @@ label {
 }
 
 .quick-row button {
-  flex: none;
-  width: 40px;
-  padding: 0;
-  font-size: 16px;
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0 13px;
+  font-size: 14px;
+  white-space: nowrap;
   border-radius: 10px;
   border-bottom-width: 2px;
   text-shadow: none;
 }
 
-/* keep the dice button flush with the input, even under the cursor */
+/* keep the Generate button flush with the input, even under the cursor */
 .quick-row button:hover,
 .quick-row button:active {
   transform: none;

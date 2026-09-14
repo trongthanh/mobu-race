@@ -33,7 +33,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.domElement.style.cssText = 'position:fixed;inset:0;z-index:0;display:block;';
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 document.body.prepend(renderer.domElement);
 
 // Track length follows the race time set by the host (rebuilt on race create).
@@ -89,10 +89,16 @@ let ws = null;
 let wsOpen = false;
 let helloName = null;
 
+function websocketUrl() {
+  const configured = window.MOBU_RACE_WS_URL;
+  if (typeof configured === 'string' && configured) return configured;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${location.host}`;
+}
+
 function connect(name) {
   if (name !== undefined) helloName = name;
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}`);
+  ws = new WebSocket(websocketUrl());
   ws.addEventListener('open', () => {
     wsOpen = true;
     if (helloName !== null) send({ type: 'hello', name: helloName });
@@ -769,19 +775,22 @@ function updateCamera(dt) {
 }
 
 // ---------- Main loop ----------
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
+timer.connect(document);
+timer.reset();
 
-function tick() {
+function tick(timestamp) {
   requestAnimationFrame(tick);
-  const dt = clock.getDelta();
-  const now = clock.elapsedTime;
+  timer.update(timestamp);
+  const dt = timer.getDelta();
+  const now = timer.getElapsed();
 
   // Watchers: idle sway on a normal day, arms-up cheering once a race is on
   const cheering =
     state.raceState === 'counting' || state.raceState === 'racing' || state.raceState === 'finished' ? 1 : 0;
   for (const w of state.watchers.values()) w.animate(now, cheering);
 
-  // World life: windmill blades, campfire flicker, drifting mist and clouds
+  // World life: windmill blades, drifting mist and clouds
   if (world.animate) world.animate(now);
 
   // Racers
