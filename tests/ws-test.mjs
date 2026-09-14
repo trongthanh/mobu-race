@@ -106,7 +106,27 @@ async function main() {
   }
   console.log('STEP 3: setup -> setup_updated broadcast OK');
 
-  // 4. A start -> countdown 3,2,1 then race_start
+  // 3b. A creates the race (step 1 of the two-step flow): racers go on the
+  // line at random slots behind the start line, race waits in 'ready'.
+  send(A, { type: 'create' });
+  const creations = [];
+  for (const [ws, label] of [[A, 'A'], [B, 'B'], [C, 'C']]) {
+    const rc = await waitFor(ws, (m) => m.type === 'race_created', `race_created on ${label}`);
+    creations.push(rc);
+  }
+  const rc = creations[0];
+  assert.strictEqual(rc.timeSec, 20);
+  assert.strictEqual(rc.racers.length, 3);
+  assert.deepStrictEqual(rc.racers.map((r) => r.lane).sort(), [0, 1, 2]);
+  for (const r of rc.racers) {
+    assert.strictEqual(r.lane, Number(r.id.slice(1)), 'lane matches rN');
+    assert.ok(r.slot, 'racer has a start slot');
+    assert.ok(Number.isFinite(r.slot.lateral) && Math.abs(r.slot.lateral) <= 3.3, 'lateral stays on the dirt');
+    assert.ok(Number.isFinite(r.slot.behind) && r.slot.behind >= 0.5 && r.slot.behind <= 5, 'starts behind the line');
+  }
+  console.log('STEP 3b: create -> race_created with slots OK');
+
+  // 4. A start (step 2) -> countdown 3,2,1 then race_start
   send(A, { type: 'start' });
   for (const [ws, label] of [[A, 'A'], [B, 'B'], [C, 'C']]) {
     const c3 = await waitFor(ws, (m) => m.type === 'countdown' && m.seconds === 3, `countdown 3 on ${label}`);
@@ -128,6 +148,7 @@ async function main() {
   for (const r of rs.racers) assert.strictEqual(r.lane, Number(r.id.slice(1)), 'lane matches rN');
   const planIds = Object.keys(rs.plan).sort();
   assert.deepStrictEqual(planIds, ['r0', 'r1', 'r2']);
+  assert.ok(typeof rs.winnerId === 'string' && /^r\d+$/.test(rs.winnerId), 'winnerId present in race_start');
 
   // validate plans: monotonic, exactly one ends [20, 1], others later
   const finishAt20 = [];
@@ -146,6 +167,7 @@ async function main() {
   }
   assert.strictEqual(finishAt20.length, 1, 'exactly one plan ends at t=20');
   const expectedWinner = finishAt20[0];
+  assert.strictEqual(rs.winnerId, expectedWinner, 'race_start winnerId matches plan ending at t=20');
   console.log(`STEP 4b: race_start valid, expected winner ${expectedWinner} OK`);
 
   // 5. collect leader messages during race
@@ -192,6 +214,13 @@ async function main() {
   }
   console.log(`STEP 6: race_finish valid, winner ${f0.winnerId}, results sorted OK`);
 
+  // 6b. winner screen must persist: no auto-reset once the race is over
+  await new Promise((r) => setTimeout(r, 800));
+  for (const [ws, label] of [[A, 'A'], [B, 'B'], [C, 'C']]) {
+    assert.ok(!ws.messages.some((m) => m.type === 'reset'), `no auto-reset on ${label}`);
+  }
+  console.log('STEP 6b: no auto-reset, winner screen persists OK');
+
   // 7. host transfer and new quick race
   send(A, { type: 'assign_host', targetId: welcomeB.id });
   for (const [ws, label] of [[A, 'A'], [B, 'B'], [C, 'C']]) {
@@ -204,6 +233,8 @@ async function main() {
   await waitFor(A, (m) => m.type === 'reset', 'reset broadcast', 15000);
   send(B, { type: 'setup', names: ['One', 'Two'], timeSec: 10 });
   await waitFor(A, (m) => m.type === 'setup_updated', 'setup_updated (B as host)');
+  send(B, { type: 'create' });
+  await waitFor(B, (m) => m.type === 'race_created' && m.timeSec === 10, 'second race_created', 15000);
   send(B, { type: 'start' });
   await waitFor(B, (m) => m.type === 'race_start' && m.timeSec === 10, 'second race_start', 15000);
   console.log('STEP 7b: B (new host) started second race with timeSec=10 OK');

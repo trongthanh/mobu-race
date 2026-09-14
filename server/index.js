@@ -204,15 +204,39 @@ export function buildPlan(names, timeSec) {
   return { plan, winnerIdx };
 }
 
+// Random starting spots just behind the start line. With big fields, spreading
+// racers across lanes would push them off the dirt, so everyone gets a random
+// spot inside the lane band (±3.3 of the 4.4 half-band) instead of a lane slot.
+function randomSlots(count) {
+  const slots = [];
+  let minDist = 1.7;
+  for (let i = 0; i < count; i++) {
+    let slot = null;
+    for (let tries = 0; tries < 80; tries++) {
+      if (tries === 40) minDist = 1.0; // relax spacing for big fields
+      const cand = {
+        lateral: (Math.random() * 2 - 1) * 3.3,
+        behind: 0.5 + Math.random() * 4.5,
+      };
+      slot = cand;
+      const ok = slots.every((s) =>
+        Math.hypot(s.lateral - cand.lateral, (s.behind - cand.behind) * 1.3) >= minDist);
+      if (ok) break;
+    }
+    slots.push(slot);
+  }
+  return slots;
+}
+
 // ---------- server factory ----------
 export function createGameServer(httpServer) {
   const wss = new WebSocketServer({ server: httpServer });
 
   // ---- game state ----
   const users = new Map(); // ws -> user {id, name, isHost, joinedAt, index}
-  let state = 'idle'; // idle | countdown | racing | finished
+  let state = 'idle'; // idle | ready | countdown | racing | finished
   let setup = { names: [], timeSec: 60 };
-  let race = null; // {racers, plan, winnerId, startAt, timeSec, finishTimers, leaderId, leaderTimer, resetTimer}
+  let race = null; // {timers, racers+slots, timeSec, plan, winnerId, startAt, leaderId, leaderTimer, lastResults}
 
   const send = (ws, obj) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -253,6 +277,8 @@ export function createGameServer(httpServer) {
 
   function startCountdown() {
     state = 'countdown';
+    race = race || { timers: [] };
+    race.timers = [];
     let s = 3;
     broadcast({ type: 'countdown', seconds: s });
     const tick = () => {
@@ -264,26 +290,21 @@ export function createGameServer(httpServer) {
         startRace();
       }
     };
-    race = { timers: [setTimeout(tick, 1000)] };
+    race.timers.push(setTimeout(tick, 1000));
   }
 
   function startRace() {
-    const names = setup.names;
-    const timeSec = setup.timeSec;
-    const { plan, winnerIdx } = buildPlan(names, timeSec);
-    const racers = names.map((name, i) => ({ id: 'r' + i, name, lane: i }));
-    const winnerId = 'r' + winnerIdx;
+    const racers = race.racers;
+    const timeSec = race.timeSec;
+    const { plan, winnerIdx } = buildPlan(racers.map((r) => r.name), timeSec);
     state = 'racing';
-    race = race || { timers: [] };
-    race.racers = racers;
     race.plan = plan;
-    race.winnerId = winnerId;
-    race.timeSec = timeSec;
+    race.winnerId = 'r' + winnerIdx;
     race.startAt = Date.now();
     race.leaderId = null;
     race.finished = false;
 
-    broadcast({ type: 'race_start', timeSec, racers, plan });
+    broadcast({ type: 'race_start', timeSec, racers, plan, winnerId: race.winnerId });
 
     // leader tick every 500ms
     const leaderTimer = setInterval(() => {
@@ -335,7 +356,8 @@ export function createGameServer(httpServer) {
       return b.progress - a.progress;
     });
     broadcast({ type: 'race_finish', results, winnerId: race.winnerId });
-    race.timers.push(setTimeout(resetToIdle, 12000));
+    race.lastResults = results;
+    // Stay on the winner screen until the host clicks "Back to paddock".
   }
 
   function resetToIdle() {
@@ -366,14 +388,24 @@ export function createGameServer(httpServer) {
       state,
       setup: { names: setup.names, timeSec: setup.timeSec },
     };
-    // Late joiners can catch up to a race already in progress.
-    if (state === 'racing' && race) {
+    // Late joiners catch up to whatever stage the race is at.
+    if (state === 'ready' && race) {
+      welcome.ready = { timeSec: race.timeSec, racers: race.racers };
+    } else if ((state === 'racing' || state === 'finished') && race) {
+      const elapsed = state === 'finished'
+        ? Math.max(...race.racers.map((r) => race.plan[r.id][race.plan[r.id].length - 1][0])) + 5
+        : (Date.now() - race.startAt) / 1000;
       welcome.race = {
         timeSec: race.timeSec,
         racers: race.racers,
         plan: race.plan,
-        elapsed: (Date.now() - race.startAt) / 1000,
+        elapsed,
+        winnerId: race.winnerId,
       };
+      if (state === 'finished') {
+        welcome.results = race.lastResults;
+        welcome.winnerId = race.winnerId;
+      }
     }
     send(ws, welcome);
     broadcastUsers();
@@ -408,13 +440,26 @@ export function createGameServer(httpServer) {
           broadcast({ type: 'setup_updated', setup: { names: setup.names, timeSec: setup.timeSec } });
           return;
         }
-        case 'start': {
+        case 'create': {
+          // Step 1 of the setup: lock the field and put the racers on the line.
           if (!user.isHost || state !== 'idle' || setup.names.length < 2) return;
+          const slots = randomSlots(setup.names.length);
+          const racers = setup.names.map((name, i) => ({ id: 'r' + i, name, lane: i, slot: slots[i] }));
+          clearRaceTimers();
+          race = { timers: [], racers, timeSec: setup.timeSec };
+          state = 'ready';
+          broadcast({ type: 'race_created', timeSec: race.timeSec, racers });
+          return;
+        }
+        case 'start': {
+          // Step 2: countdown, then the pack runs.
+          if (!user.isHost || state !== 'ready') return;
           startCountdown();
           return;
         }
         case 'reset': {
-          if (!user.isHost || state !== 'finished') return;
+          // Back to setup from the line, or back to the paddock after a race.
+          if (!user.isHost || (state !== 'ready' && state !== 'finished')) return;
           resetToIdle();
           return;
         }
@@ -428,11 +473,6 @@ export function createGameServer(httpServer) {
               return;
             }
           }
-          return;
-        }
-        case 'reset': {
-          if (!user.isHost || state !== 'finished') return;
-          resetToIdle();
           return;
         }
         default:

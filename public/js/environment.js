@@ -118,7 +118,10 @@ export function createWorld(opts = {}) {
     return (i0 + f) / N;
   }
 
-  function lanePoint(progress, lane, totalLanes) {
+  // lateral: meters offset from the track centerline (positive = outward).
+  // The lane band spans ±(lanes*laneWidth/2) = ±4.4, so anything within ±3.3
+  // stays safely on the dirt no matter how many racers there are.
+  function lanePoint(progress, lateral = 0) {
     const p = ((progress % 1) + 1) % 1;
     const t = tFromS(p * length);
     const pos = ellipsePos(aC, bC, t, new THREE.Vector3());
@@ -126,9 +129,8 @@ export function createWorld(opts = {}) {
     const ang = t * Math.PI * 2;
     const nx = bC * Math.sin(ang), nz = aC * Math.cos(ang);
     const nl = Math.hypot(nx, nz) || 1;
-    const off = (lane - (totalLanes - 1) / 2 + 0.5) * laneWidth;
-    pos.x += (nx / nl) * off;
-    pos.z += (nz / nl) * off;
+    pos.x += (nx / nl) * lateral;
+    pos.z += (nz / nl) * lateral;
     pos.y = 0.05;
     return pos;
   }

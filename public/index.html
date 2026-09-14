@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Mobu Race</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Reddit+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
@@ -28,8 +31,14 @@
         <h3>Spectators</h3>
         <ul id="userList"></ul>
 
+        <!-- Step 1: name the racers, pick the duration, create the race -->
         <div id="setupPanel" class="hidden">
           <textarea id="namesInput" rows="6" placeholder="One racer name per line"></textarea>
+          <label for="quickCount">Generate numbered racers</label>
+          <div class="quick-row">
+            <input id="quickCount" type="number" min="2" max="12" value="8" inputmode="numeric" aria-label="Number of racers" />
+            <button id="quickGenBtn" class="btn-secondary" aria-label="Generate numbered racers">🎲</button>
+          </div>
           <label for="timeInput">Race seconds (track length)</label>
           <select id="timeInput">
             <option value="10">10s — sprint loop</option>
@@ -39,7 +48,18 @@
             <option value="90">90s — long track</option>
             <option value="120">120s — marathon loop</option>
           </select>
-          <button id="startBtn" class="btn-green">🏁 Start Race</button>
+          <button id="createBtn" class="btn-green">Create race</button>
+        </div>
+
+        <!-- Step 2: racers are on the line, host starts the race -->
+        <div id="readyPanel" class="hidden">
+          <p id="readyInfo">0 racers on the line</p>
+          <button id="startBtn" class="btn-green">🏁 Start race</button>
+          <button id="cancelBtn" class="btn-secondary">← Back to setup</button>
+        </div>
+
+        <div id="readyWaiting" class="hidden">
+          <p id="readyWaitingInfo">Racers on the line…</p>
         </div>
 
         <div id="waitingPanel">
@@ -72,12 +92,15 @@
     <!-- Countdown -->
     <div id="countdown" class="overlay big hidden">3</div>
 
-    <!-- Results -->
-    <div id="results" class="overlay panel hidden">
-      <h2 id="winnerTitle">🏆 Winner!</h2>
-      <ol id="resultList"></ol>
-      <button id="backBtn" class="btn-green hidden">Back to paddock</button>
-      <p id="resultWaiting" class="hidden">Waiting for host…</p>
+    <!-- Winner celebration -->
+    <div id="congrats" class="overlay big hidden">
+      <canvas id="confetti" class="hidden"></canvas>
+      <div id="congratsBox">
+        <div id="congratsTitle">🎉 CONGRATULATIONS 🎉</div>
+        <div id="congratsName">??? wins!</div>
+      </div>
+      <button id="backBtn" class="btn-back hidden">🏠 Back to paddock</button>
+      <p id="resultWaiting" class="hidden">Waiting for the host to return to the paddock…</p>
     </div>
 
   </div>

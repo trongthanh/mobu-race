@@ -7,7 +7,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: #87c46b;
-  font-family: 'Nunito', 'Baloo 2', 'Trebuchet MS', 'Verdana', sans-serif;
+  font-family: 'Reddit Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-weight: 800;
   color: #5a3a1a;
   -webkit-tap-highlight-color: transparent;
@@ -92,6 +92,11 @@ button:hover { filter: brightness(1.08); transform: translateY(-2px); }
 button:active { transform: translateY(2px); border-bottom-width: 2px; }
 
 .btn-green { width: 100%; }
+
+.btn-secondary {
+  background: #e8b64c;
+  border-bottom-color: #b07d1e;
+}
 
 /* ---------- Inputs ---------- */
 input, textarea, select {
@@ -180,6 +185,76 @@ label {
 
 #setupPanel { margin-top: 10px; border-top: 2px dashed #d9b98a; padding-top: 10px; }
 
+#createBtn { margin-top: 10px; }
+
+/* numbered-racer quick generator row */
+.quick-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 0;
+}
+
+/* Reddit Sans has tall font metrics, so Chrome gives the number input a
+   ~40px natural height; both controls get that same explicit height. */
+.quick-row input,
+.quick-row button {
+  box-sizing: border-box;
+  height: 40px;
+  margin: 0;
+  padding: 0 10px;
+}
+
+.quick-row input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 10px;
+  border-width: 2px;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.quick-row input::-webkit-outer-spin-button,
+.quick-row input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.quick-row button {
+  flex: none;
+  width: 40px;
+  padding: 0;
+  font-size: 16px;
+  border-radius: 10px;
+  border-bottom-width: 2px;
+  text-shadow: none;
+}
+
+/* keep the dice button flush with the input, even under the cursor */
+.quick-row button:hover,
+.quick-row button:active {
+  transform: none;
+}
+
+#readyPanel {
+  margin-top: 10px;
+  border-top: 2px dashed #d9b98a;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#readyPanel p { font-size: 13px; color: #8a5a2b; }
+
+#readyWaiting { margin-top: 10px; border-top: 2px dashed #d9b98a; padding-top: 10px; }
+
+#readyWaiting p { font-size: 13px; color: #8a5a2b; }
+
 #waitingPanel p { font-size: 13px; color: #8a5a2b; margin-top: 8px; }
 
 /* ---------- Camera panel ---------- */
@@ -229,13 +304,11 @@ label {
   min-width: 170px;
 }
 
-#lbList, #resultList {
+#lbList {
   list-style: none;
-  counter-reset: rank;
 }
 
-#lbList li, #resultList li {
-  counter-increment: rank;
+#lbList li {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -244,15 +317,8 @@ label {
   border-radius: 8px;
 }
 
-#lbList li::before, #resultList li::before {
-  content: counter(rank) ".";
-  color: #8a5a2b;
-  min-width: 18px;
-  text-align: right;
-}
-
 /* First place gets gold */
-#lbList li:first-child, #resultList li:first-child {
+#lbList li:first-child {
   background: #ffe9a8;
   border: 2px solid #e8b64c;
   font-size: 14px;
@@ -269,16 +335,54 @@ label {
     0 10px 24px rgba(0, 0, 0, 0.4);
 }
 
-/* ---------- Results ---------- */
-#results h2 {
-  color: #8a5a2b;
-  font-size: 26px;
+/* ---------- Winner celebration ---------- */
+#confetti {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#congratsBox {
+  position: relative;
   text-align: center;
 }
 
-#resultList li { font-size: 16px; padding: 5px 8px; }
+#congratsTitle {
+  font-size: clamp(40px, 9vmin, 96px);
+  color: #ffc93c;
+  letter-spacing: 4px;
+  text-shadow:
+    -4px -4px 0 #8a5a2b, 4px -4px 0 #8a5a2b,
+    -4px 4px 0 #8a5a2b, 4px 4px 0 #8a5a2b,
+    0 12px 28px rgba(0, 0, 0, 0.4);
+}
 
-#resultWaiting { color: #8a5a2b; font-size: 15px; }
+#congratsName {
+  margin-top: 12px;
+  font-size: clamp(26px, 6vmin, 60px);
+  color: #fff6e0;
+  text-shadow:
+    0 4px 0 #8a5a2b,
+    0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
+.btn-back {
+  width: auto;
+  margin-top: 10px;
+  font-size: 17px;
+  padding: 12px 26px;
+}
+
+#resultWaiting {
+  color: #8a5a2b;
+  font-size: 15px;
+  background: rgba(255, 246, 224, 0.9);
+  padding: 6px 14px;
+  border-radius: 12px;
+  border: 2px solid #d9b98a;
+}
 
 /* ---------- Narrow screens ---------- */
 @media (max-width: 640px) {
