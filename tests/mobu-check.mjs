@@ -69,6 +69,19 @@ function main() {
   }
   console.log('poses: finite transforms at rest/run speeds — OK');
 
+  // 7b. the celebrate pose loops finite and above ground too (and hands off
+  // cleanly once celebrating turns off)
+  mobu.setCelebrating(true);
+  for (const t of [0, 0.37, 1.2, 5.7]) {
+    mobu.animate(t, 0);
+    group.updateMatrixWorld(true);
+    checkFinite(group, `celebrate(t=${t})`);
+    assert.ok(group.position.y >= -0.001, `celebrate keeps the rig above the ground at t=${t}`);
+  }
+  mobu.setCelebrating(false);
+  mobu.animate(0, 0);
+  console.log('celebrate pose: finite transforms, grounded — OK');
+
   // 8. the egg profile is one smooth silhouette: no pinched neck
   let minWidth = Infinity;
   for (let y = 0.8; y <= 2.2; y += 0.05) minWidth = Math.min(minWidth, radiusAt(y));

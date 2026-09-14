@@ -55,7 +55,9 @@ PLAN.md for the original brief.
   screen persists until the host sends `reset` (allowed in `ready` and `finished` only).
 - Racer track position maps plan progress via
   `dispP = -startFrac + p * (1 + startFrac)` so racers start behind the line and cross
-  exactly on plan time. Finished racers park in arrival order (cooldown parade) and a
+  exactly on plan time. Finished racers park past the line in leaderboard order —
+  the winner coasts farthest, the last finisher stops right by it (cooldown parade),
+  and the winner celebrates (`setCelebrating`) once parked; a
   lateral separation pass keeps mobus from merging.
 - `rebuildWorld(timeSec)` recreates the scene (track scale follows race duration);
   racers/watchers must be re-added to the new scene afterwards.

@@ -291,11 +291,34 @@ export function createMobu(opts = {}) {
   // run/idle cycles only add a wobble on top. Lean/roll go on `upper`, so
   // they play in the character's own facing frame.
   let heading = 0;
+  let celebrating = false;
 
   function animate(t, speed = 0) {
     const s = Math.min(1, Math.max(0, speed));
 
-    if (s > 0.02) {
+    if (celebrating && s <= 0.02) {
+      // --- celebrate: victory hops in place, both arms punched overhead and
+      // waving out of phase, tufts bouncing. Takes over from the idle pose
+      // only once the mobu has actually stopped (speed ~ 0), so a racer
+      // coasts to their spot first and then starts celebrating.
+      const f = t * 7;
+      group.position.y = GROUND_Y + Math.abs(Math.sin(f)) * 0.26;
+      upper.position.y = 0;
+      upper.rotation.x = -0.08; // a proud little lean back
+      upper.rotation.z = Math.sin(f) * 0.06;
+      group.rotation.y = heading + Math.sin(f * 0.5) * 0.22;
+
+      // Arms wave in a wide V — the base angle is picked so the hands clear
+      // the egg's silhouette and stay below the (huge) grin, otherwise the
+      // raised arms vanish behind the head from almost every camera angle.
+      arms[0].rotation.z = -(3 * Math.PI / 4) + Math.sin(f) * 0.3;
+      arms[1].rotation.z = (3 * Math.PI / 4) - Math.sin(f * 1.3 + 0.8) * 0.3;
+      legs[0].rotation.x = 0;
+      legs[1].rotation.x = 0;
+
+      lips.position.y = Math.abs(Math.sin(f)) * 0.04;
+      tufts.rotation.x = Math.sin(f + 0.9) * 0.12;
+    } else if (s > 0.02) {
       // --- run cycle: a bouncy waddle
       const f = t * 9;
       group.position.y = GROUND_Y + Math.abs(Math.sin(f)) * 0.12 * s; // hop
@@ -335,7 +358,7 @@ export function createMobu(opts = {}) {
     }
   }
 
-  return { group, animate, setHeading: (h) => { heading = h; }, setCostume, rig };
+  return { group, animate, setHeading: (h) => { heading = h; }, setCostume, setCelebrating: (on) => { celebrating = !!on; }, rig };
 }
 
 /** Free a removed rig's GPU buffers. Materials cached in rig.js are shared

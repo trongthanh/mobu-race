@@ -385,8 +385,9 @@ function placeWatcher(w, index, total) {
 // Racer bodies stay the reference amber; outfits are what tell them apart.
 
 // Anti-overlap: mobus sidestep sideways when they crowd each other, and
-// finishers park in arrival order down the straight (a cooldown parade)
-// instead of piling up on one spot past the line.
+// finishers park past the line in leaderboard order (a cooldown parade):
+// the winner coasts the farthest down the straight, the last finisher stops
+// right by the line.
 const SEP_LONG = 1.4;  // minimum gap along the track (m)
 const SEP_LAT = 1.1;   // minimum gap sideways (m)
 const BAND_MAX = 3.3;  // lateral limit that keeps racers on the dirt
@@ -431,6 +432,7 @@ function buildRaceScene(msg) {
     scene.add(group);
     state.racers.push({
       ...r, group, animate, setHeading: mobu.setHeading,
+      setCelebrating: mobu.setCelebrating,
       lateral, startFrac,
       sepLat: lateral,
       coastMeters: 1, coastDur: 2.4, coastFrac: 0,
@@ -459,16 +461,32 @@ function startRace(msg, elapsedOffset = 0) {
     r.finished = p0 >= 1;
     r.finishElapsed = r.finished ? msg.plan[r.id][msg.plan[r.id].length - 1][0] : null;
   }
-  // Park spots past the line in arrival order: the first finisher stops right
-  // after the line, each next one a step farther, so the field strings out
-  // into a cooldown parade instead of merging into one blob.
+  // Park spots past the line in leaderboard order: the winner coasts the
+  // farthest down the straight, each next finisher stops a step closer to the
+  // line, so the parked field reads front-to-back just like the results board
+  // instead of merging into one blob.
   const byFinish = state.racers.slice().sort((a, b) =>
     msg.plan[a.id][msg.plan[a.id].length - 1][0] - msg.plan[b.id][msg.plan[b.id].length - 1][0]);
+  const lastIdx = byFinish.length - 1;
   byFinish.forEach((r, idx) => {
-    r.coastMeters = 1 + 1.5 * idx;
-    r.coastDur = Math.min(8, 2.2 + r.coastMeters * 0.35);
+    r.coastMeters = 1 + 1.5 * (lastIdx - idx);
+    // The coast starts at the racer's own cross-line pace (their plan's last
+    // segment) and decays linearly to zero on the park spot: sprint through
+    // the line, then bleed speed all the way to the stop with no pop. With
+    // coastDur = 2·distance/pace the ease-out below starts at exactly `pace`.
+    const kfs = msg.plan[r.id];
+    const [t1, p1] = kfs[kfs.length - 1];
+    const [t0, p0] = kfs[kfs.length - 2];
+    const pace = Math.max(0.5,
+      ((p1 - p0) / Math.max(0.001, t1 - t0)) * (1 + r.startFrac) * world.track.length);
+    r.coastDur = Math.min(8, (2 * r.coastMeters) / pace);
     r.coastFrac = r.coastMeters / world.track.length;
   });
+  // A winner already past the line (late joiner opening a finished race)
+  // starts mid-celebration; live, tick() flips it when they cross.
+  for (const r of state.racers) {
+    r.setCelebrating(r.finished && state.winnerId != null && r.id === state.winnerId);
+  }
   el.congrats.classList.add('hidden');
   confetti.stop();
   el.raceHud.classList.remove('hidden');
@@ -674,17 +692,28 @@ function lerpAngle(a, b, t) {
   return a + d * t;
 }
 
+// The leader's direction of travel, stripped of the wobble that animate()
+// adds on top of group.rotation.y — chasing the animated angle made the
+// chase camera swing with every step (and swing hard during the winner's
+// celebration hops). Before the race starts racers have no dispP yet, so
+// fall back to their spot on the line.
+function stableLeaderHeading(leader) {
+  return leader.dispP !== undefined
+    ? facingAt(leader.dispP, leader.sepLat)
+    : facingAt(-leader.startFrac, leader.lateral);
+}
+
 function updateCamera(dt) {
   const leader = state.racers.find((r) => r.id === state.leaderId) || state.racers[0];
   const leaderPos = leader ? leader.group.position : _v.set(0, 0, world.track.b);
   // Ease the focus point toward the leader (~0.3s to settle after a swap).
   if (!camFocusInit) {
     camFocus.copy(leaderPos);
-    if (leader) camHeading = leader.group.rotation.y;
+    if (leader) camHeading = stableLeaderHeading(leader);
     camFocusInit = true;
   }
   camFocus.lerp(leaderPos, 1 - Math.exp(-3.5 * dt));
-  if (leader) camHeading = lerpAngle(camHeading, leader.group.rotation.y, 1 - Math.exp(-4 * dt));
+  if (leader) camHeading = lerpAngle(camHeading, stableLeaderHeading(leader), 1 - Math.exp(-4 * dt));
   const t = camFocus;
 
   let az, el, dist;
@@ -756,15 +785,22 @@ function tick() {
       if (p >= 1 && !r.finished) {
         r.finished = true;
         r.finishElapsed = elapsed;
+        // The winner's celebration waits for the gate inside animate(): they
+        // coast to their spot first, then start hopping once stopped.
+        if (r.id === state.winnerId) r.setCelebrating(true);
       }
       // Plan progress -> track progress: everyone starts behind the line and
       // stretches into the lap, so each racer crosses exactly on plan time.
       let dispP = -r.startFrac + p * (1 + r.startFrac);
       let speed = 1;
       if (r.finished) {
+        // Quadratic ease-out over the park distance: speed starts AT the
+        // racer's cross-line pace (coastDur was sized for that) and bleeds
+        // linearly to zero exactly on the park spot. The waddle animation
+        // tracks the same ratio, so legs slow with the body.
         const k = Math.min(1, (elapsed - r.finishElapsed) / r.coastDur);
         dispP = 1 + r.coastFrac * (1 - (1 - k) * (1 - k));
-        speed = k < 1 ? Math.max(0.3, 1 - k) : 0;
+        speed = Math.max(0, 1 - k);
       }
       r.dispP = dispP;
       const pos = world.lanePoint(dispP, r.sepLat);
