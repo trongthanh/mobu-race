@@ -378,71 +378,162 @@ export function disposeRig(rootObj) {
 }
 
 // ---------------------------------------------------------------- watcher
-const WATCHER_PALETTE = [
-  0xa8d8b9, 0xf4b896, 0xb8c9f0, 0xf0e3a8, 0xd8b8f0, 0xa8e0e0, 0xf0a8c0, 0xc8e0a8,
-];
+// Spectators styled after ref/cozy-3d-game-people.png: chunky little humans
+// with a big round head, a bowl of hair (or a hat) on top, a compact body,
+// stubby arms and legs, ink-dot eyes and a tiny smile. The whole look is
+// derived from a SEED — main.js hashes the visitor's id — so every client
+// renders the identical crowd (per-client Math.random() would desync it).
+const SKIN_TONES = [0xf6d7b0, 0xeab68b, 0xd69a66, 0xb87a4d, 0x8a5a3a];
+const HAIR_COLORS = [0x3f2a1d, 0x241d1a, 0x6b4a2f, 0xc99548, 0x8a3f2a, 0x9a9a9a, 0x2c4a73];
+const SHIRT_COLORS = [0xe4574c, 0xf5731f, 0xf9d976, 0x9bd45f, 0x5fc9c2, 0x8ab6f9, 0xb98cf7, 0xf4a8c0, 0xfff4e0, 0x495867];
+const PANTS_COLORS = [0x4a6fa5, 0x6a4a36, 0x495867, 0x8a7a5a, 0x3e5a44, 0x7a4a5a];
+const HAT_COLORS = [0xd9534f, 0x4a90d9, 0x6aab5a, 0xf9d976, 0x495867];
+
+function watcherRng(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export function createWatcher(opts = {}) {
-  const palette = WATCHER_PALETTE;
-  const idx = Math.floor(Math.random() * palette.length);
-  const bodyColor = opts.bodyColor !== undefined ? opts.bodyColor : palette[idx];
-  const headColor = opts.headColor !== undefined ? opts.headColor : 0xf3d5b5; // cozy skin
+  const rng = watcherRng(opts.seed ?? Math.floor(Math.random() * 0xffffffff));
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  const skinMat = mat(pick(SKIN_TONES));
+  const shirtMat = mat(pick(SHIRT_COLORS));
+  const pantsMat = mat(pick(PANTS_COLORS));
+  const hairC = pick(HAIR_COLORS);
+  const look = rng();       // bowl hair / ponytail / hat
+  const skirt = rng() < 0.28;
+  const blush = rng() < 0.45;
+  const legsMat = skirt ? skinMat : pantsMat; // bare legs under a skirt
 
   const group = new THREE.Group();
-  const bodyMat = mat(bodyColor);
 
-  // round capsule body
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.45, 6, 14), bodyMat);
-  body.position.y = 0.75;
-  group.add(body);
+  // legs + little shoes
+  const legGeo = new THREE.CylinderGeometry(0.062, 0.07, 0.42, 8);
+  const shoeGeo = new THREE.SphereGeometry(0.075, 8, 7);
+  const shoeMat = mat(0x4a3a2c);
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(legGeo, legsMat);
+    leg.position.set(side * 0.095, 0.24, 0);
+    group.add(leg);
+    const shoe = new THREE.Mesh(shoeGeo, shoeMat);
+    shoe.scale.set(1, 0.6, 1.45);
+    shoe.position.set(side * 0.095, 0.05, 0.035);
+    group.add(shoe);
+  }
 
-  // sphere head with simple face hint
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), mat(headColor));
-  head.position.y = 1.28;
+  if (skirt) {
+    const sk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.27, 0.26, 12), shirtMat);
+    sk.position.y = 0.55;
+    group.add(sk);
+  }
+
+  // compact torso
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.185, 0.36, 6, 14), shirtMat);
+  torso.position.y = 0.82;
+  group.add(torso);
+
+  // arms: pivots at the shoulders so they can hang, sway — or wave
+  const arms = [];
+  const sleeveGeo = new THREE.CapsuleGeometry(0.055, 0.28, 4, 10);
+  const handGeo = new THREE.SphereGeometry(0.062, 8, 7);
+  for (const side of [-1, 1]) {
+    const arm = new THREE.Group();
+    arm.position.set(side * 0.235, 1.06, 0);
+    const sleeve = new THREE.Mesh(sleeveGeo, shirtMat);
+    sleeve.position.y = -0.18;
+    const hand = new THREE.Mesh(handGeo, skinMat);
+    hand.position.y = -0.36;
+    arm.add(sleeve, hand);
+    group.add(arm);
+    arms.push(arm);
+  }
+
+  // neck + big round head
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.09, 8), skinMat);
+  neck.position.y = 1.2;
+  group.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.205, 18, 14), skinMat);
+  head.position.y = 1.415;
   group.add(head);
 
+  // hair (bowl cut, optionally with a ponytail) or a brimmed hat
+  if (look < 0.62) {
+    const hairMat = mat(hairC);
+    // a cap slightly larger than the head, tipped a touch over the brow
+    const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.225, 16, 12, 0, Math.PI * 2, 0, 1.95), hairMat);
+    bowl.position.set(0, 1.43, -0.01);
+    bowl.rotation.x = 0.14;
+    group.add(bowl);
+    const back = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 10), hairMat);
+    back.position.set(0, 1.36, -0.1);
+    back.scale.set(1, 0.95, 0.9);
+    group.add(back);
+    if (look < 0.2) {
+      const tie = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), hairMat);
+      tie.position.set(0, 1.34, -0.24);
+      group.add(tie);
+      const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.2, 4, 8), hairMat);
+      tail.position.set(0, 1.19, -0.27);
+      group.add(tail);
+    }
+  } else {
+    const hatMat = mat(pick(HAT_COLORS));
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.265, 0.275, 0.045, 16), hatMat);
+    brim.position.y = 1.53;
+    group.add(brim);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), hatMat);
+    dome.position.y = 1.53;
+    dome.scale.set(1, 0.8, 1);
+    group.add(dome);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.215, 0.05, 16), mat(0xfff4e0));
+    band.position.y = 1.5;
+    group.add(band);
+  }
+
+  // face: ink-dot eyes, tiny smile, optional blush
   const faceMat = mat(0x333333, { roughness: 0.6 });
-  const eyeGeo = new THREE.SphereGeometry(0.028, 8, 6);
+  const eyeGeo = new THREE.SphereGeometry(0.022, 8, 6);
   for (const side of [-1, 1]) {
     const eye = new THREE.Mesh(eyeGeo, faceMat);
-    eye.position.set(side * 0.08, 1.32, 0.21);
+    eye.position.set(side * 0.068, 1.445, 0.192);
     group.add(eye);
   }
-  // little smile
-  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 12, Math.PI), faceMat);
+  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.009, 6, 12, Math.PI), faceMat);
   smile.rotation.z = Math.PI;
-  smile.position.set(0, 1.24, 0.22);
+  smile.position.set(0, 1.385, 0.19);
   group.add(smile);
-
-  // tiny feet
-  const footGeo = new THREE.SphereGeometry(0.09, 10, 8);
-  for (const side of [-1, 1]) {
-    const foot = new THREE.Mesh(footGeo, mat(0x8a6d5a));
-    foot.scale.set(1, 0.6, 1.3);
-    foot.position.set(side * 0.12, 0.06, 0.03);
-    group.add(foot);
-  }
-
-  // arms
-  const armGeo = new THREE.CapsuleGeometry(0.06, 0.2, 4, 8);
-  for (const side of [-1, 1]) {
-    const arm = new THREE.Mesh(armGeo, bodyMat);
-    arm.position.set(side * 0.32, 0.85, 0);
-    arm.rotation.z = side * 0.5;
-    group.add(arm);
+  if (blush) {
+    const blushMat = mat(0xf2a3a3, { roughness: 0.8 });
+    for (const side of [-1, 1]) {
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 6), blushMat);
+      dot.scale.set(1, 0.55, 0.35);
+      dot.position.set(side * 0.12, 1.395, 0.158);
+      group.add(dot);
+    }
   }
 
   setShadow(group);
 
   // Heading lives on rotation.y (set via setHeading); animate only sways
   // around it. YXZ keeps the sway/roll in the watcher's facing frame.
+  // `excite` (0..1) turns the idle sway into a cheer: arms punched up,
+  // waving out of phase, bouncing to a faster beat.
   group.rotation.order = 'YXZ';
   let heading = 0;
-  const baseY = 0;
-  function animate(t) {
-    group.position.y = baseY + Math.abs(Math.sin(t * 1.7)) * 0.03;
-    group.rotation.z = Math.sin(t * 1.1) * 0.04;
-    group.rotation.y = heading + Math.sin(t * 0.6) * 0.1;
+  function animate(t, excite = 0) {
+    const e = Math.min(1, Math.max(0, excite));
+    group.position.y = Math.abs(Math.sin(t * (1.7 + e * 3.2))) * (0.025 + e * 0.055);
+    group.rotation.z = Math.sin(t * 1.1) * (0.04 + e * 0.02);
+    group.rotation.y = heading + Math.sin(t * 0.6) * (0.1 + e * 0.06);
+    const wave = Math.sin(t * (5.2 + e * 2.5));
+    arms[0].rotation.z = -(0.3 + e * 2.35) + wave * 0.3 * e;
+    arms[1].rotation.z = (0.3 + e * 2.35) + wave * 0.3 * e;
   }
 
   return { group, animate, setHeading: (h) => { heading = h; } };

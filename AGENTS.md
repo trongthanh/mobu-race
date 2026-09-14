@@ -18,6 +18,10 @@ PLAN.md for the original brief.
   (grin/head ratios, grounded feet, ~3.75 canonical height, garment shells, pose
   finiteness). Run it after touching `rig.js` / `mobu.js` / `costumes.js`.
 
+## Verification
+
+- After implementing a user-visible change, verify it in the browser with Chrome DevTools MCP. For a full implementation check, always hand off to a background agent pinned to `openai-codex/gpt-5.6-luna`; it must exercise the relevant flow, inspect the rendered scene, and check the console. For a quick check, the primary agent may call Chrome DevTools MCP directly.
+
 ## Layout
 
 - `server/index.js` — everything server-side: host role, state machine

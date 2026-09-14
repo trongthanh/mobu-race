@@ -57,7 +57,9 @@ function rebuildWorld(timeSec) {
   renderWatchers();
 }
 
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 600);
+// Near plane 0.5 keeps depth precision good across the foggy valley (the
+// far plane must reach the terrain rim, well past the fog wall).
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 1400);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -354,9 +356,11 @@ function renderWatchers() {
   }
   state.users.forEach((u, i) => {
     if (state.watchers.has(u.id)) return;
-    const w = createWatcher({});
+    // The avatar's outfit is hashed from the visitor's id+name so every
+    // client renders the identical crowd (never per-client Math.random()).
+    const w = createWatcher({ seed: costumeSeedFromText(u.id + '|' + u.name) });
     const sprite = makeNameSprite(u.name + (u.isHost ? ' 👑' : ''), { height: 0.5 });
-    sprite.position.y = 2.1;
+    sprite.position.y = 2.0;
     w.group.add(sprite);
     scene.add(w.group);
     state.watchers.set(u.id, { ...w, sprite });
@@ -772,8 +776,13 @@ function tick() {
   const dt = clock.getDelta();
   const now = clock.elapsedTime;
 
-  // Watchers idle animation
-  for (const w of state.watchers.values()) w.animate(now);
+  // Watchers: idle sway on a normal day, arms-up cheering once a race is on
+  const cheering =
+    state.raceState === 'counting' || state.raceState === 'racing' || state.raceState === 'finished' ? 1 : 0;
+  for (const w of state.watchers.values()) w.animate(now, cheering);
+
+  // World life: windmill blades, campfire flicker, drifting mist and clouds
+  if (world.animate) world.animate(now);
 
   // Racers
   if ((state.raceState === 'racing' || state.raceState === 'finished') && state.plan) {

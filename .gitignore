@@ -1,7 +1,9 @@
 TODO.md
+.pi/tasks/
 
 node_modules/
 
+*.glb
 bin/
 main
 .env

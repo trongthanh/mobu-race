@@ -1,5 +1,11 @@
-// Mobu Race — cozy farm-village world (track + scenery)
+// Mobu Race — cozy foggy-valley world (track + scenery)
 // Self-contained: only THREE import.
+//
+// The race runs on the floor of a broad, shallow valley: the land stays flat
+// across the track apron, then rolls up GENTLY on all sides — open downs,
+// never peaks — until the haze swallows it. A dirt road wanders off north
+// into the fog, a pond sits in the infield, and the valley is dressed with
+// trees, bushes, farm animals, hay bales and a windmill.
 
 import * as THREE from '../vendor/three.module.js';
 
@@ -14,8 +20,9 @@ function mulberry32(seed) {
   };
 }
 
-const SKY = 0x9fd8f5;
-const FOG = 0xcdeaf7;
+// Soft cream-blue haze: the sky melts into the fog right at the horizon.
+const SKY_ZENITH = 0x74b9e3;
+const FOG = 0xdcead8;
 
 function stdMat(color, opts = {}) {
   return new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.9, metalness: 0.0 }, opts));
@@ -29,6 +36,22 @@ function ellipsePos(a, b, t, out = new THREE.Vector3()) {
   return out.set(a * Math.sin(ang), 0, b * Math.cos(ang));
 }
 
+// Soft radial blob for the drifting mist banks.
+function mistTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 8, 64, 64, 62);
+  g.addColorStop(0, 'rgba(255,255,255,0.85)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0.32)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export function createWorld(opts = {}) {
   const trackScale = opts.trackScale || 1;
   const a = 26 * trackScale;
@@ -37,14 +60,15 @@ export function createWorld(opts = {}) {
   const laneWidth = 1.1;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(SKY);
-  scene.fog = new THREE.Fog(FOG, a * 3.5, a * 9);
+  const fogFar = a * 6.2 + 150;
+  scene.background = new THREE.Color(FOG);
+  scene.fog = new THREE.Fog(FOG, a * 1.4, fogFar);
 
   // ---------- lights ----------
-  const hemi = new THREE.HemisphereLight(0xfff3d6, 0x6a8f3c, 0.85);
+  const hemi = new THREE.HemisphereLight(0xfff3d6, 0x7c9a4d, 0.9);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff2d9, 1.6);
-  sun.position.set(a * 1.2, 40, -b);
+  const sun = new THREE.DirectionalLight(0xfff2d9, 1.5);
+  sun.position.set(a * 1.2, 42, -b);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const span = a * 3.2;
@@ -56,28 +80,120 @@ export function createWorld(opts = {}) {
   sun.shadow.camera.far = a * 6;
   sun.shadow.bias = -0.0005;
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.22));
+
+  // ---------- valley terrain ----------
+  // Height field shared by the terrain mesh AND scenery placement: flat
+  // (y = 0) across an elliptical apron around the track, then a smooth
+  // low-rise climb with rolling noise. No hills tower — the walls top out
+  // around 10-13 units a couple of hundred meters out, then the fog takes over.
+  const M = 16 + a * 0.15;            // flat apron width around the track
+  const flatA = a + M, flatB = b + M; // apron edge: e = hypot(x/flatA, z/flatB) == 1
+  const RISE = 5.8 + a * 0.04;        // how far the valley walls climb
+  const SLOPE_W = 1.15;               // climb width, in normalized e units
+
+  function valleyNoise(x, z) {
+    return (
+      Math.sin(x * 0.043 + 1.7) * Math.cos(z * 0.037 - 0.6) +
+      0.55 * Math.sin(x * 0.012 - z * 0.017 + 3.4) +
+      0.3 * Math.sin((x + z) * 0.021 + 1.2)
+    );
+  }
+
+  function groundHeight(x, z) {
+    const e = Math.hypot(x / flatA, z / flatB);
+    if (e <= 1) return 0;
+    const t = Math.min(1, (e - 1) / SLOPE_W);
+    const rise = t * t * (3 - 2 * t); // smoothstep 0..1 across the climb
+    const far = Math.min(1, Math.max(0, (e - 1 - SLOPE_W) * 1.4));
+    return rise * (RISE + valleyNoise(x, z) * 1.0) + far * (1.0 + valleyNoise(x * 1.7, z * 1.7) * 0.5);
+  }
+
+  // Radial terrain disc: dense rings around the flat->slope transition,
+  // coarser far out where only fog-colored silhouette remains.
+  const maxR = fogFar * 1.18;
+  const RINGS = 110, SEGS = 96;
+  {
+    const pos = [], col = [], idx = [];
+    const cGrassA = new THREE.Color(0x66b13b);
+    const cGrassB = new THREE.Color(0x8ccd55);
+    const cSage = new THREE.Color(0xa8bf68); // drier tint up the slopes
+    const tmpC = new THREE.Color();
+    for (let i = 0; i <= RINGS; i++) {
+      const t = i / RINGS;
+      const r = maxR * Math.pow(t, 1.35);
+      for (let j = 0; j <= SEGS; j++) {
+        const ang = (j / SEGS) * Math.PI * 2;
+        const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
+        const y = groundHeight(x, z);
+        pos.push(x, y, z);
+        const n = valleyNoise(x * 0.6 + 40, z * 0.6 - 20);
+        tmpC.copy(cGrassA).lerp(cGrassB, THREE.MathUtils.clamp(0.5 + n * 0.35, 0, 1));
+        tmpC.lerp(cSage, Math.min(1, y / RISE) * 0.45);
+        // per-vertex dither so the big far triangles don't band
+        const d = (Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
+        tmpC.offsetHSL(0, 0, d * 0.012);
+        col.push(tmpC.r, tmpC.g, tmpC.b);
+      }
+    }
+    for (let i = 0; i < RINGS; i++) {
+      for (let j = 0; j < SEGS; j++) {
+        const p0 = i * (SEGS + 1) + j, p1 = p0 + 1, p2 = p0 + SEGS + 1, p3 = p2 + 1;
+        idx.push(p0, p1, p2, p1, p3, p2); // up-facing winding
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 1, metalness: 0,
+    }));
+    terrain.receiveShadow = true;
+    scene.add(terrain);
+  }
+
+  // ---------- sky dome ----------
+  // A gradient dome (horizon == fog color) so the hazy distance blends
+  // seamlessly into the sky — that's what sells the open-world depth.
+  {
+    const geo = new THREE.SphereGeometry(1, 32, 18);
+    const posAttr = geo.attributes.position;
+    const col = [];
+    const horizon = new THREE.Color(FOG);
+    const zenith = new THREE.Color(SKY_ZENITH);
+    const tmpC = new THREE.Color();
+    for (let i = 0; i < posAttr.count; i++) {
+      const t = THREE.MathUtils.clamp((posAttr.getY(i) + 0.06) / 0.85, 0, 1);
+      tmpC.copy(horizon).lerp(zenith, t * t * (3 - 2 * t));
+      col.push(tmpC.r, tmpC.g, tmpC.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false,
+    }));
+    sky.scale.setScalar(maxR * 1.05);
+    sky.renderOrder = -10;
+    scene.add(sky);
+  }
 
   const group = new THREE.Group();
   scene.add(group);
 
-  // ---------- grass ----------
-  const grass = new THREE.Mesh(
-    new THREE.CircleGeometry(a * 3, 64),
-    stdMat(0x6abe30)
-  );
-  grass.rotation.x = -Math.PI / 2;
-  grass.receiveShadow = true;
-  group.add(grass);
+  // ---------- animated props (driven by the returned animate()) ----------
+  const spinners = []; // windmill blade hubs
+  const mists = [];    // drifting fog banks
+  const clouds = [];   // lazy cloud puffs
 
-  // lighter grass patches
+  // lighter grass patches on the apron
   const patchMat = stdMat(0x7ecb45);
   const patchGeo = new THREE.CircleGeometry(1, 16);
   for (let i = 0; i < 14; i++) {
     const p = new THREE.Mesh(patchGeo, patchMat);
     const ang = (i / 14) * Math.PI * 2 + 0.7;
     const r = a * (1.1 + 0.5 * ((i * 37) % 10) / 10);
-    p.position.set(Math.cos(ang) * r, 0.005, Math.sin(ang) * r * 0.7);
+    p.position.set(Math.cos(ang) * r, 0.012, Math.sin(ang) * r * 0.7);
     p.scale.setScalar(3 + (i % 4) * 1.5);
     p.rotation.x = -Math.PI / 2;
     p.receiveShadow = true;
@@ -141,6 +257,7 @@ export function createWorld(opts = {}) {
   const innerB = bC - bandHalf - 0.6;
   const outerA = aC + bandHalf + 0.6;
   const outerB = bC + bandHalf + 0.6;
+  const outerZ = outerB + 0.7;
 
   function ellipseShape(rx, rz, segs = 96) {
     const s = new THREE.Shape();
@@ -291,6 +408,46 @@ export function createWorld(opts = {}) {
   // ---------- scenery ----------
   const rand = mulberry32(42);
 
+  // A dirt road wanders north off the track and fades into the fog — the
+  // classic open-world "where does that go?" hook. Kept as a corridor check
+  // so trees don't grow in the middle of it.
+  const pathPts = [];
+  for (let d = 0; d <= fogFar * 0.85; d += 4.2) {
+    const wob = Math.sin(d * 0.05) * 5 + Math.sin(d * 0.016 + 2) * 8;
+    pathPts.push({ x: wob, z: -(outerB + 2.5) - d });
+  }
+  function nearPath(x, z, pad) {
+    for (const p of pathPts) {
+      const dx = p.x - x, dz = p.z - z;
+      if (dx * dx + dz * dz < pad * pad) return true;
+    }
+    return false;
+  }
+  function angDist(a1, a2) {
+    let d = (a1 - a2) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d);
+  }
+  // Where scenery may stand: clear of the track apron's inner ring, the
+  // grandstand field (south), the road corridor and the two fence arcs.
+  function canSit(x, z, pad = 0) {
+    const e = Math.hypot(x / flatA, z / flatB);
+    if (e < 0.8) return false;
+    if (z > outerZ - 1 && Math.abs(x) < 13) return false;
+    if (nearPath(x, z, 5 + pad)) return false;
+    if (e < 1.05) {
+      const ang = Math.atan2(z, x);
+      const rr = Math.hypot(x, z);
+      if (rr < outerA + 8 &&
+          (angDist(ang, 0.05) < 0.55 || angDist(ang, Math.PI) < 0.55)) return false;
+    }
+    return true;
+  }
+  function spotOnSlope(ang, e) {
+    return { x: Math.cos(ang) * e * flatA, z: Math.sin(ang) * e * flatB };
+  }
+
   function pineTree(s) {
     const g = new THREE.Group();
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * s, 0.25 * s, 0.9 * s, 7), stdMat(0x7a4b2a));
@@ -325,6 +482,32 @@ export function createWorld(opts = {}) {
     return g;
   }
 
+  // tall round canopy — most go green, a few turn autumn-gold for coziness
+  function roundTree(s) {
+    const g = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * s, 0.24 * s, 1.5 * s, 7), stdMat(0x8a5a33));
+    trunk.position.y = 0.75 * s;
+    trunk.castShadow = true;
+    g.add(trunk);
+    const r = rand();
+    const leaf = r < 0.55 ? 0x5aab48 : r < 0.8 ? 0x6fbf4a : r < 0.9 ? 0xd9822b : 0xc9a83a;
+    const canopy = new THREE.Mesh(new THREE.SphereGeometry(1.05 * s, 9, 8), stdMat(leaf));
+    canopy.position.y = 1.95 * s;
+    canopy.scale.set(1, 0.92, 1);
+    canopy.castShadow = true;
+    g.add(canopy);
+    return g;
+  }
+
+  function bush(x, z, s) {
+    const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55 * s, 1), stdMat(rand() > 0.5 ? 0x4e9e3d : 0x66b34a));
+    b.position.set(x, groundHeight(x, z) + 0.3 * s, z);
+    b.scale.set(1, 0.75, 1);
+    b.rotation.y = rand() * Math.PI;
+    b.castShadow = true;
+    group.add(b);
+  }
+
   function house(x, z, rotY, roofColor, scale = 1) {
     const g = new THREE.Group();
     const body = new THREE.Mesh(new THREE.BoxGeometry(3.6 * scale, 2.2 * scale, 3 * scale), stdMat(0xfff1d6));
@@ -336,6 +519,10 @@ export function createWorld(opts = {}) {
     roof.rotation.y = Math.PI / 4;
     roof.castShadow = true;
     g.add(roof);
+    const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.32 * scale, 0.9 * scale, 0.32 * scale), stdMat(0x9e6b52));
+    chimney.position.set(0.9 * scale, 3.2 * scale, -0.4 * scale);
+    chimney.castShadow = true;
+    g.add(chimney);
     const door = new THREE.Mesh(new THREE.BoxGeometry(0.7 * scale, 1.2 * scale, 0.1), stdMat(0x8a5a33));
     door.position.set(0, 0.6 * scale, 1.52 * scale);
     g.add(door);
@@ -344,7 +531,7 @@ export function createWorld(opts = {}) {
       win.position.set(wx * scale, 1.3 * scale, 1.52 * scale);
       g.add(win);
     }
-    g.position.set(x, 0, z);
+    g.position.set(x, groundHeight(x, z) - 0.05, z);
     g.rotation.y = rotY;
     group.add(g);
   }
@@ -354,7 +541,7 @@ export function createWorld(opts = {}) {
     const colors = [0xff6f91, 0xffd54f, 0xba68c8, 0xff8a65];
     const stemGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.3, 5);
     const headGeo = new THREE.SphereGeometry(0.14, 8, 6);
-    const n = 6 + Math.floor(rand() * 6);
+    const n = 5 + Math.floor(rand() * 4);
     for (let i = 0; i < n; i++) {
       const fx = (rand() - 0.5) * 2.2, fz = (rand() - 0.5) * 2.2;
       const stem = new THREE.Mesh(stemGeo, stdMat(0x4c9a2a));
@@ -365,13 +552,13 @@ export function createWorld(opts = {}) {
       head.castShadow = true;
       g.add(head);
     }
-    g.position.set(x, 0, z);
+    g.position.set(x, groundHeight(x, z), z);
     group.add(g);
   }
 
   function rock(x, z, s) {
     const r = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), stdMat(0x9e9e9e, { roughness: 1 }));
-    r.position.set(x, s * 0.5, z);
+    r.position.set(x, groundHeight(x, z) + s * 0.5, z);
     r.rotation.set(rand(), rand(), rand());
     r.castShadow = true;
     group.add(r);
@@ -406,32 +593,325 @@ export function createWorld(opts = {}) {
     }
   }
 
-  // --- tree ring outside the track ---
-  const treeRingR = outerB + 4;
-  for (let i = 0; i < 34; i++) {
-    const ang = (i / 34) * Math.PI * 2 + rand() * 0.12;
-    const rr = treeRingR + 2 + rand() * (a * 1.1);
-    const x = Math.cos(ang) * rr * 1.4;
-    const z = Math.sin(ang) * rr;
-    const s = 0.9 + rand() * 1.1;
-    const tree = rand() < 0.55 ? pineTree(s) : blobTree(s);
-    tree.position.set(x, 0, z);
-    tree.rotation.y = rand() * Math.PI * 2;
-    group.add(tree);
+  function hayBale(x, z) {
+    const g = new THREE.Group();
+    const bale = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.95, 12), stdMat(0xd9ae4e));
+    bale.rotation.z = Math.PI / 2; // lying on its side
+    bale.castShadow = true;
+    g.add(bale);
+    g.position.set(x, groundHeight(x, z) + 0.55, z);
+    g.rotation.y = rand() * Math.PI;
+    group.add(g);
   }
 
-  // --- houses outside the track ---
-  house(-a * 1.5, -b * 1.6, 0.5, 0xd32f2f, 1.2);   // red roof
-  house(a * 1.6, -b * 1.2, -0.8, 0x1976d2, 1.0);   // blue roof
-  house(a * 1.4, b * 1.8, 2.4, 0xf57c00, 1.1);     // orange roof
-  house(-a * 1.7, b * 1.5, -0.4, 0x1976d2, 0.9);   // blue roof
+  function sheep(x, z) {
+    const g = new THREE.Group();
+    const wool = stdMat(0xf3eee3, { roughness: 1 });
+    const dark = stdMat(0x4a4038);
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), wool);
+    body.scale.set(1.15, 0.9, 0.85);
+    body.position.y = 0.52;
+    body.castShadow = true;
+    g.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 7), dark);
+    head.position.set(0, 0.7, 0.44);
+    head.castShadow = true;
+    g.add(head);
+    const legGeo = new THREE.CylinderGeometry(0.05, 0.045, 0.3, 6);
+    for (const [lx, lz] of [[-0.18, 0.16], [0.18, 0.16], [-0.18, -0.16], [0.18, -0.16]]) {
+      const leg = new THREE.Mesh(legGeo, dark);
+      leg.position.set(lx, 0.15, lz);
+      g.add(leg);
+    }
+    g.position.set(x, groundHeight(x, z), z);
+    g.rotation.y = rand() * Math.PI * 2;
+    group.add(g);
+  }
+
+  function chicken(x, z) {
+    const g = new THREE.Group();
+    const white = stdMat(0xfff8e8);
+    const red = stdMat(0xd94b3d);
+    const yellow = stdMat(0xf2b84b);
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 9, 7), white);
+    body.scale.set(1, 1.05, 1.15);
+    body.position.y = 0.27;
+    body.castShadow = true;
+    g.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 7), white);
+    head.position.set(0, 0.47, 0.2);
+    head.castShadow = true;
+    g.add(head);
+    const comb = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 5), red);
+    comb.position.set(0, 0.6, 0.2);
+    g.add(comb);
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.13, 5), yellow);
+    beak.position.set(0, 0.47, 0.34);
+    beak.rotation.x = Math.PI / 2;
+    g.add(beak);
+    for (const lx of [-0.07, 0.07]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.18, 5), yellow);
+      leg.position.set(lx, 0.09, 0);
+      g.add(leg);
+    }
+    g.position.set(x, groundHeight(x, z), z);
+    g.rotation.y = rand() * Math.PI * 2;
+    group.add(g);
+  }
+
+  function pig(x, z) {
+    const g = new THREE.Group();
+    const pink = stdMat(0xf3a0a7);
+    const snoutMat = stdMat(0xe98291);
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.48, 10, 8), pink);
+    body.scale.set(1.2, 0.78, 0.88);
+    body.position.y = 0.45;
+    body.castShadow = true;
+    g.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 9, 7), pink);
+    head.position.set(0, 0.48, 0.42);
+    head.castShadow = true;
+    g.add(head);
+    const snout = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.08, 8), snoutMat);
+    snout.position.set(0, 0.45, 0.67);
+    snout.rotation.x = Math.PI / 2;
+    g.add(snout);
+    for (const lx of [-0.28, 0.28]) {
+      for (const lz of [-0.22, 0.22]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.28, 6), pink);
+        leg.position.set(lx, 0.14, lz);
+        g.add(leg);
+      }
+    }
+    g.position.set(x, groundHeight(x, z), z);
+    g.rotation.y = rand() * Math.PI * 2;
+    group.add(g);
+  }
+
+  function windmill(x, z) {
+    const g = new THREE.Group();
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.72, 6.5, 8), stdMat(0x9a6a43));
+    tower.position.y = 3.25;
+    tower.castShadow = true;
+    g.add(tower);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(0.85, 0.9, 8), stdMat(0x7c4a2a));
+    cap.position.y = 6.9;
+    cap.castShadow = true;
+    g.add(cap);
+    const hub = new THREE.Group();
+    hub.position.set(0, 6.1, 0.95);
+    const sailMat = stdMat(0xf3e6c8, { side: THREE.DoubleSide });
+    for (let i = 0; i < 4; i++) {
+      const blade = new THREE.Group();
+      blade.rotation.z = (i / 4) * Math.PI * 2;
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.6, 0.06), stdMat(0x8a5a33));
+      arm.position.y = 1.3;
+      const sail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.7, 0.04), sailMat);
+      sail.position.set(0.34, 1.5, 0);
+      sail.rotation.z = 0.16;
+      blade.add(arm, sail);
+      hub.add(blade);
+    }
+    g.add(hub);
+    spinners.push(hub);
+    g.position.set(x, groundHeight(x, z), z);
+    g.rotation.y = Math.atan2(-x, -z); // face the valley floor
+    group.add(g);
+  }
+
+  function bench(cx, cz, rotY, len = 17.2) {
+    const g = new THREE.Group();
+    const wood = stdMat(0xa97c50);
+    const legMat = stdMat(0x8a5a33);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.55), wood);
+    seat.position.y = 0.5;
+    seat.castShadow = true;
+    g.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(len, 0.4, 0.09), wood);
+    back.position.set(0, 0.85, -0.26);
+    back.rotation.x = -0.12;
+    back.castShadow = true;
+    g.add(back);
+    for (const lx of [-len / 2 + 0.4, len / 2 - 0.4]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.5), legMat);
+      leg.position.set(lx, 0.25, 0);
+      leg.castShadow = true;
+      g.add(leg);
+    }
+    g.position.set(cx, groundHeight(cx, cz), cz);
+    g.rotation.y = rotY;
+    group.add(g);
+  }
+
+  function post(x, z, h = 1.5) {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, h, 7), stdMat(0x8a5a33));
+    p.position.set(x, groundHeight(x, z) + h / 2, z);
+    p.castShadow = true;
+    group.add(p);
+    return p;
+  }
+
+  // a drooping line of triangle pennants between two points — race-day bunting
+  function pennantLine(x0, y0, z0, x1, y1, z1, sag = 0.9) {
+    const flagCols = [0xe4574c, 0xf9d976, 0x5fc9c2, 0xb98cf7, 0xf5731f];
+    const geo = new THREE.ConeGeometry(0.16, 0.34, 4);
+    const mats = flagCols.map((c) => stdMat(c, { side: THREE.DoubleSide }));
+    const n = Math.max(4, Math.floor(Math.hypot(x1 - x0, z1 - z0) / 1.5));
+    const lineAng = Math.atan2(x1 - x0, z1 - z0);
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      const x = x0 + (x1 - x0) * t;
+      const z = z0 + (z1 - z0) * t;
+      const y = y0 + (y1 - y0) * t - Math.sin(t * Math.PI) * sag;
+      const flag = new THREE.Mesh(geo, mats[i % mats.length]);
+      flag.rotation.order = 'YXZ';
+      flag.rotation.y = lineAng;
+      flag.rotation.x = Math.PI; // hang point-down
+      flag.position.set(x, y - 0.17, z);
+      group.add(flag);
+    }
+  }
+
+  // the wandering road, as a single ribbon mesh that follows the terrain
+  function buildPathRibbon(pts, width, color) {
+    const pos = [], idx = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const q = pts[Math.min(pts.length - 1, i + 1)];
+      const o = pts[Math.max(0, i - 1)];
+      let dx = q.x - o.x, dz = q.z - o.z;
+      const l = Math.hypot(dx, dz) || 1;
+      dx /= l; dz /= l;
+      const nx = -dz, nz = dx;
+      const y = groundHeight(p.x, p.z) + 0.05;
+      pos.push(p.x + nx * width / 2, y, p.z + nz * width / 2);
+      pos.push(p.x - nx * width / 2, y, p.z - nz * width / 2);
+      if (i > 0) {
+        const a0 = (i - 1) * 2;
+        idx.push(a0, a0 + 2, a0 + 1, a0 + 1, a0 + 2, a0 + 3);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, stdMat(color, { side: THREE.DoubleSide }));
+    m.receiveShadow = true;
+    group.add(m);
+  }
+
+  // --- pond in the infield, with a sandy rim, lily pads and reeds ---
+  const pondC = { x: -innerA * 0.42, z: innerB * 0.1 };
+  const pondRx = Math.min(7, innerA * 0.3);
+  const pondRz = pondRx * 0.62;
+  {
+    const rim = new THREE.Mesh(new THREE.CircleGeometry(1, 30), stdMat(0xd8c79c));
+    rim.rotation.x = -Math.PI / 2;
+    rim.scale.set(pondRx + 0.7, pondRz + 0.7, 1);
+    rim.position.set(pondC.x, 0.012, pondC.z);
+    rim.receiveShadow = true;
+    group.add(rim);
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 30),
+      stdMat(0x5fb6d9, { roughness: 0.35 })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.scale.set(pondRx, pondRz, 1);
+    water.position.set(pondC.x, 0.03, pondC.z);
+    group.add(water);
+    const padGeo = new THREE.CircleGeometry(0.26, 9);
+    const padMat = stdMat(0x3e8e4a);
+    for (let i = 0; i < 3; i++) {
+      const pad = new THREE.Mesh(padGeo, padMat);
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(pondC.x + (rand() - 0.5) * pondRx, 0.045, pondC.z + (rand() - 0.5) * pondRz);
+      group.add(pad);
+    }
+    const reedStem = new THREE.CylinderGeometry(0.02, 0.025, 0.55, 5);
+    const reedTip = new THREE.CylinderGeometry(0.035, 0.035, 0.16, 6);
+    for (let i = 0; i < 6; i++) {
+      const ang = rand() * Math.PI * 2;
+      const rx = pondC.x + Math.cos(ang) * (pondRx + 0.5);
+      const rz = pondC.z + Math.sin(ang) * (pondRz + 0.5);
+      const stem = new THREE.Mesh(reedStem, stdMat(0x4c9a2a));
+      stem.position.set(rx, 0.28, rz);
+      group.add(stem);
+      const tip = new THREE.Mesh(reedTip, stdMat(0x7a4b2a));
+      tip.position.set(rx, 0.6, rz);
+      group.add(tip);
+    }
+  }
+
+  // --- tree cover: dense near the valley floor, thinning up the slopes ---
+  let planted = 0, attempts = 0;
+  while (planted < 78 && attempts++ < 700) {
+    const ang = rand() * Math.PI * 2;
+    const e = 0.86 + Math.pow(rand(), 0.8) * 3.4; // denser near, sparser far
+    const { x, z } = spotOnSlope(ang, e);
+    if (!canSit(x, z)) continue;
+    const s = 0.9 + rand() * 1.3;
+    const kind = rand();
+    const tree = kind < 0.4 ? pineTree(s) : kind < 0.78 ? blobTree(s) : roundTree(s);
+    tree.position.set(x, groundHeight(x, z) - 0.05, z);
+    tree.rotation.y = rand() * Math.PI * 2;
+    group.add(tree);
+    planted++;
+  }
+
+  // --- bushes sprinkled between the trees ---
+  for (let i = 0, tries = 0; i < 26 && tries < 200; tries++) {
+    const ang = rand() * Math.PI * 2;
+    const e = 0.85 + rand() * 2.6;
+    const { x, z } = spotOnSlope(ang, e);
+    if (!canSit(x, z)) continue;
+    bush(x, z, 0.6 + rand() * 0.7);
+    i++;
+  }
+
+  // --- houses just off the apron, sitting on the rising ground ---
+  house(-a * 1.35, -b * 1.5, 0.5, 0xd32f2f, 1.85); // red roof
+  house(a * 1.45, -b * 1.3, -0.8, 0x1976d2, 1.65);  // blue roof
+  house(a * 1.3, b * 1.6, 2.4, 0xf57c00, 1.75);     // orange roof
+  house(-a * 1.5, b * 1.3, -0.4, 0x1976d2, 1.55);   // blue roof
+  house(a * 0.2, -b * 1.95, 0.1, 0x7cb342, 1.7);    // green roof, near the road
+  house(a * 0.6, b * 2.05, 3.0, 0xf57c00, 1.55);    // orange roof, south-east
 
   // --- fence arcs near the track ---
   fenceArc(0, 0, -0.35, 0.45, outerA + 3.5, 7);
   fenceArc(0, 0, Math.PI - 0.4, Math.PI + 0.4, outerA + 3.5, 7);
 
+  // --- hay bales resting on the apron ---
+  for (const [ang, e] of [[0.35, 0.88], [2.6, 0.92], [3.6, 0.87], [5.5, 0.93]]) {
+    const { x, z } = spotOnSlope(ang, e);
+    if (!canSit(x, z)) continue;
+    hayBale(x, z);
+  }
+
+  // --- farm animals grazing around the larger houses ---
+  for (let i = 0, tries = 0; i < 7 && tries < 80; tries++) {
+    const ang = rand() * Math.PI * 2;
+    const e = 1.25 + rand() * 1.15;
+    const { x, z } = spotOnSlope(ang, e);
+    if (!canSit(x, z)) continue;
+    sheep(x, z);
+    i++;
+  }
+  for (const [x, z] of [
+    [-a * 1.17, -b * 1.63], [-a * 1.08, -b * 1.72], [-a * 1.25, -b * 1.78],
+    [a * 0.38, -b * 1.78], [a * 0.5, -b * 1.86],
+  ]) chicken(x, z);
+  for (const [x, z] of [
+    [a * 0.08, -b * 1.7], [a * 0.32, -b * 1.72], [a * 0.2, -b * 1.82],
+  ]) pig(x, z);
+
+  // --- windmill on the western slope ---
+  {
+    const { x, z } = spotOnSlope(2.4, 1.28);
+    windmill(x, z);
+  }
+
   // --- flower patches & rocks ---
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 10; i++) {
     const ang = rand() * Math.PI * 2;
     const rr = outerA + 4 + rand() * a * 1.4;
     flowerPatch(Math.cos(ang) * rr * 1.3, Math.sin(ang) * rr * 0.75);
@@ -441,9 +921,9 @@ export function createWorld(opts = {}) {
     const rr = outerA + 3 + rand() * a * 1.5;
     rock(Math.cos(ang) * rr * 1.35, Math.sin(ang) * rr * 0.75, 0.3 + rand() * 0.7);
   }
-  // a few rocks inside the infield
+  // a few rocks inside the infield (east side, clear of the pond)
   for (let i = 0; i < 3; i++) {
-    const ang = rand() * Math.PI * 2;
+    const ang = rand() * 1.6 - 0.8;
     rock(Math.cos(ang) * innerA * 0.4, Math.sin(ang) * innerB * 0.4, 0.35 + rand() * 0.4);
   }
   // infield tree
@@ -453,10 +933,35 @@ export function createWorld(opts = {}) {
   flowerPatch(2.5, 1.5);
   flowerPatch(-2.5, -1.5);
 
+  // --- grandstand benches behind the start line ---
+  for (let row = 0; row < 3; row++) {
+    bench(0, outerZ + 1.5 + row * 2.4 + 1.35, Math.PI);
+  }
+
+  // --- bunting: pennant lines from the banner poles out along the fence ---
+  {
+    const poleTopY = 4;
+    const poleZN = stripeZ - halfW; // north-side banner pole
+    const poleZS = stripeZ + halfW; // south-side banner pole (grandstand side)
+    for (const sx of [-1, 1]) {
+      const ex = sx * a * 1.05, ez = b * 0.9;
+      post(ex, ez);
+      pennantLine(-0.25, poleTopY, poleZN, ex, 1.35, ez);
+    }
+    for (const sx of [-1, 1]) {
+      const ex = sx * 8, ez = outerZ + 8.5;
+      post(ex, ez);
+      pennantLine(-0.25, poleTopY, poleZS, ex, 1.3, ez, 0.7);
+    }
+  }
+
+  // --- the road north, fading into the fog ---
+  buildPathRibbon(pathPts, 3, 0xcdb083);
+
   // --- clouds ---
   const cloudMat = stdMat(0xffffff, { roughness: 1, flatShading: false });
   const cloudGeo = new THREE.SphereGeometry(1, 10, 8);
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 8; i++) {
     const c = new THREE.Group();
     const puffs = 3 + Math.floor(rand() * 3);
     for (let j = 0; j < puffs; j++) {
@@ -465,12 +970,40 @@ export function createWorld(opts = {}) {
       puff.scale.set(1.6 + rand(), 0.9 + rand() * 0.4, 1.2 + rand() * 0.6);
       c.add(puff);
     }
-    const ang = (i / 7) * Math.PI * 2;
-    c.position.set(Math.cos(ang) * a * 1.6, 24 + rand() * 4, Math.sin(ang) * b * 2.2);
+    const ang = (i / 8) * Math.PI * 2;
+    const x = Math.cos(ang) * a * (1.6 + rand() * 0.8);
+    const z = Math.sin(ang) * b * (2.2 + rand());
+    c.position.set(x, 24 + rand() * 6, z);
     group.add(c);
+    clouds.push({ g: c, x, i });
   }
 
-  const track = { a, b, laneWidth, lanes, length, outerZ: outerB + 0.7 };
+  // --- low mist banks drifting over the lower slopes ---
+  const mistTex = mistTexture();
+  for (let i = 0; i < 12; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: mistTex, transparent: true, depthWrite: false,
+      opacity: 0.16 + rand() * 0.14,
+    });
+    const sp = new THREE.Sprite(mat);
+    const ang = rand() * Math.PI * 2;
+    const e = 1.25 + rand() * 1.6;
+    const x = Math.cos(ang) * e * flatA, z = Math.sin(ang) * e * flatB;
+    sp.position.set(x, groundHeight(x, z) + 2 + rand() * 3.5, z);
+    const s = 26 + rand() * 34;
+    sp.scale.set(s, s * 0.32, 1);
+    group.add(sp);
+    mists.push({ sp, x, i });
+  }
 
-  return { scene, group, track, lanePoint };
+  // ---------- gentle life: wind, mist, clouds ----------
+  function animate(t) {
+    for (const h of spinners) h.rotation.z = t * 0.85;
+    for (const m of mists) m.sp.position.x = m.x + Math.sin(t * 0.02 + m.i * 1.7) * 4;
+    for (const c of clouds) c.g.position.x = c.x + Math.sin(t * 0.008 + c.i * 2.1) * 7;
+  }
+
+  const track = { a, b, laneWidth, lanes, length, outerZ };
+
+  return { scene, group, track, lanePoint, groundHeight, animate };
 }
