@@ -123,8 +123,12 @@ async function main() {
     assert.ok(r.slot, 'racer has a start slot');
     assert.ok(Number.isFinite(r.slot.lateral) && Math.abs(r.slot.lateral) <= 3.3, 'lateral stays on the dirt');
     assert.ok(Number.isFinite(r.slot.behind) && r.slot.behind >= 0.5 && r.slot.behind <= 5, 'starts behind the line');
+    assert.ok(
+      Number.isInteger(r.costumeSeed) && r.costumeSeed >= 0 && r.costumeSeed < 0x100000000,
+      'racer carries a costume seed',
+    );
   }
-  console.log('STEP 3b: create -> race_created with slots OK');
+  console.log('STEP 3b: create -> race_created with slots and costume seeds OK');
 
   // 4. A start (step 2) -> countdown 3,2,1 then race_start
   send(A, { type: 'start' });
@@ -146,6 +150,7 @@ async function main() {
   assert.strictEqual(rs.racers.length, 3);
   assert.deepStrictEqual(rs.racers.map((r) => r.lane).sort(), [0, 1, 2]);
   for (const r of rs.racers) assert.strictEqual(r.lane, Number(r.id.slice(1)), 'lane matches rN');
+  for (const r of rs.racers) assert.ok(Number.isInteger(r.costumeSeed), 'race_start racers still carry costume seeds');
   const planIds = Object.keys(rs.plan).sort();
   assert.deepStrictEqual(planIds, ['r0', 'r1', 'r2']);
   assert.ok(typeof rs.winnerId === 'string' && /^r\d+$/.test(rs.winnerId), 'winnerId present in race_start');

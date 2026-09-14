@@ -444,7 +444,16 @@ export function createGameServer(httpServer) {
           // Step 1 of the setup: lock the field and put the racers on the line.
           if (!user.isHost || state !== 'idle' || setup.names.length < 2) return;
           const slots = randomSlots(setup.names.length);
-          const racers = setup.names.map((name, i) => ({ id: 'r' + i, name, lane: i, slot: slots[i] }));
+          // Costumes are not controllable: every create rolls a fresh random
+          // seed per racer and clients derive the outfit from it, so all
+          // clients see the same (re)shuffled wardrobe.
+          const racers = setup.names.map((name, i) => ({
+            id: 'r' + i,
+            name,
+            lane: i,
+            slot: slots[i],
+            costumeSeed: Math.floor(Math.random() * 0x100000000),
+          }));
           clearRaceTimers();
           race = { timers: [], racers, timeSec: setup.timeSec };
           state = 'ready';

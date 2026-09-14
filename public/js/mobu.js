@@ -1,17 +1,27 @@
-// Mobu Race - character & prop builders (Three.js r186 ESM)
+// Mobu Race - character builders (Three.js r186 ESM)
+// The mobu rig is a faithful port of ref/MOBU.md: one lathed egg (no neck),
+// the two-sausage grin with round corner bulbs, ink eyes, three tufts leaning
+// BACK over the crown, capsule arms, stubby legs and the shell shorts.
+// Everything is built in canonical units (3.75 tall, feet at y=0) under an
+// inner root that is scaled as ONE unit to fit the track's world scale.
 import * as THREE from '../vendor/three.module.js';
+import {
+  MOBU_PALETTE, sharedMat, lathe, profileSlice, radiusAt,
+  BODY_BOTTOM, BODY_UP, BODY_DOWN, HIP_R, WAIST_Y, HEAD_Y, HEAD_R, CROWN_Y,
+  LIP_Y, LIP_R, LIP_THETA, LIP_UP_DY, LIP_UP_R, LIP_LOW_DY, LIP_LOW_R,
+  LIP_END_R, LIP_CURL, LIP_FUSE,
+  EYE_Y, EYE_X, EYE_Z, TUFT_Y, TUFT_LEAN,
+  LEG_LEN, LEG_X, LEG_R, SHOULDER_Y, SHOULDER_X, ARM_LEN, ARM_R, ARM_OUT_ROT,
+} from './rig.js';
+import { applyCostume } from './costumes.js';
 
-const DEFAULTS = {
-  bodyColor: 0xffc93c,
-  lipsColor: 0xff7a1a,
-  shortsColor: 0xffd23f,
-};
-
-function mat(color, extra = {}) {
-  return new THREE.MeshStandardMaterial(
-    Object.assign({ color, roughness: 0.9, metalness: 0.0 }, extra)
-  );
-}
+// World-scale factor: the canonical rig is 3.75 tall, the track was built
+// around a ~1.8-unit mobu (lane width 1.1). Scale the whole rig, never parts.
+export const MOBU_SCALE = 0.5;
+// lanePoint() returns y = 0.05; rig feet are built at local y = 0.
+const GROUND_Y = 0.05;
+// Name sprites hang above the tufts, in the outer (unscaled) group's frame.
+export const MOBU_SPRITE_Y = 2.1;
 
 function setShadow(obj) {
   obj.traverse((o) => {
@@ -19,193 +29,329 @@ function setShadow(obj) {
   });
 }
 
-// ---------------------------------------------------------------- shorts tex
-function makeShortsMaterial(baseColorHex) {
-  const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
-  const ctx = c.getContext('2d');
-  const base = '#' + new THREE.Color(baseColorHex).getHexString();
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, 128, 128);
-  // white eggs
-  ctx.fillStyle = '#fffdf2';
-  const egg = (x, y, s) => {
-    ctx.beginPath();
-    ctx.ellipse(x, y, s, s * 1.35, 0, 0, Math.PI * 2);
-    ctx.fill();
-  };
-  egg(24, 30, 8);
-  egg(78, 20, 7);
-  egg(110, 64, 6);
-  egg(52, 82, 9);
-  egg(14, 96, 6);
-  // white bananas (simple crescent arcs)
-  ctx.strokeStyle = '#fffdf2';
-  ctx.lineWidth = 7;
-  ctx.lineCap = 'round';
-  const banana = (x, y, r, a0, a1) => {
-    ctx.beginPath();
-    ctx.arc(x, y, r, a0, a1);
-    ctx.stroke();
-  };
-  banana(96, 40, 14, 0.6, 2.4);
-  banana(36, 60, 12, 3.5, 5.3);
-  banana(90, 100, 13, 2.8, 4.8);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const m = new THREE.MeshStandardMaterial({
-    map: tex,
-    roughness: 0.9,
-    metalness: 0.0,
-  });
-  return m;
+// ---------------------------------------------------------------- the grin
+const LIP_COLS = 26; // sweep columns per tube, tip to tip
+const LIP_SEG = 14;  // samples round the tube's circumference
+const LIP_CAPS = 4;  // rings closing each hemispherical end
+
+/** How far along the smile we are: 0 at the centre, 1 at the corner, as the
+ *  square of the corner's X — a parabola in the plane the camera sees. */
+function sway(u) {
+  const s = Math.sin(u * LIP_THETA) / Math.sin(LIP_THETA);
+  return s * s;
 }
 
-// ---------------------------------------------------------------- mobu
+/** The centre line of one lip at sweep position u ∈ [-1,1], offset dy from the crease. */
+function lipCentre(u, dy, out) {
+  const th = u * LIP_THETA;
+  const s = sway(u);
+  return out.set(
+    LIP_R * Math.sin(th),
+    LIP_Y + LIP_CURL * s + dy * (1 - LIP_FUSE * s),
+    LIP_R * Math.cos(th),
+  );
+}
+
+/** One lip tube swept tip to tip, closed at both ends with a hemisphere.
+ *  Both tubes run to the same LIP_END_R, so the two caps read as ONE round,
+ *  thick bulb at each corner — two sausages joined, not two pipe ends. */
+function lipTube(dy, r0, pos, idx) {
+  const c = new THREE.Vector3(), t = new THREE.Vector3();
+  const ahead = new THREE.Vector3(), behind = new THREE.Vector3();
+  const capC = new THREE.Vector3(), p = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+  const rings = [];
+
+  const frameAt = (u) => {
+    lipCentre(u, dy, c);
+    lipCentre(Math.min(1, u + 0.01), dy, ahead);
+    lipCentre(Math.max(-1, u - 0.01), dy, behind);
+    t.copy(ahead).sub(behind).normalize();
+  };
+
+  // The first basis vector is the OUTWARD radial direction squared up against
+  // the tangent, so consecutive rings share an orientation and the tube cannot
+  // twist along the sweep (a free-floating frame shows as a spiral crease).
+  const ring = (centre, tan, r) => {
+    e1.set(centre.x, 0, centre.z).normalize();
+    e1.addScaledVector(tan, -e1.dot(tan)).normalize();
+    e2.crossVectors(tan, e1);
+    rings.push(pos.length / 3);
+    for (let j = 0; j < LIP_SEG; j++) {
+      const a = (j / LIP_SEG) * Math.PI * 2;
+      p.copy(centre).addScaledVector(e1, r * Math.cos(a)).addScaledVector(e2, r * Math.sin(a));
+      pos.push(p.x, p.y, p.z);
+    }
+  };
+
+  const radiusAtU = (u) => r0 + (LIP_END_R - r0) * sway(u);
+
+  // ---- the corner at -θ: apex first, then rings opening out to full radius
+  frameAt(-1);
+  const apexA = pos.length / 3;
+  p.copy(c).addScaledVector(t, -LIP_END_R);
+  pos.push(p.x, p.y, p.z);
+  for (let k = LIP_CAPS; k >= 1; k--) {
+    const al = (k / (LIP_CAPS + 1)) * (Math.PI / 2);
+    capC.copy(c).addScaledVector(t, -LIP_END_R * Math.sin(al));
+    ring(capC, t, LIP_END_R * Math.cos(al));
+  }
+
+  // ---- the sweep (column 0 IS the -θ cap's base ring, at α=0)
+  for (let i = 0; i < LIP_COLS; i++) {
+    const u = -1 + (2 * i) / (LIP_COLS - 1);
+    frameAt(u);
+    ring(c, t, radiusAtU(u));
+  }
+
+  // ---- the corner at +θ
+  frameAt(1);
+  for (let k = 1; k <= LIP_CAPS; k++) {
+    const al = (k / (LIP_CAPS + 1)) * (Math.PI / 2);
+    capC.copy(c).addScaledVector(t, LIP_END_R * Math.sin(al));
+    ring(capC, t, LIP_END_R * Math.cos(al));
+  }
+  const apexB = pos.length / 3;
+  p.copy(c).addScaledVector(t, LIP_END_R);
+  pos.push(p.x, p.y, p.z);
+
+  // Stitch. Ring vertices run about (e1 → e2), rings advance along +t, and
+  // (e1, e2, t) is right-handed, so ∂angle × ∂t points OUT of the tube.
+  const before = idx.length;
+  for (let r = 0; r < rings.length - 1; r++) {
+    for (let j = 0; j < LIP_SEG; j++) {
+      const j2 = (j + 1) % LIP_SEG;
+      const a = rings[r] + j, b = rings[r] + j2;
+      const d = rings[r + 1] + j, e = rings[r + 1] + j2;
+      idx.push(a, b, d, b, e, d);
+    }
+  }
+  const last = rings[rings.length - 1];
+  for (let j = 0; j < LIP_SEG; j++) {
+    const j2 = (j + 1) % LIP_SEG;
+    idx.push(rings[0] + j2, rings[0] + j, apexA); // near apex fans backward…
+    idx.push(last + j, last + j2, apexB);         // …far apex forward
+  }
+  return idx.length - before;
+}
+
+/** The grin: upper lip, then lower, as one geometry with two material groups. */
+function sausageLips() {
+  const pos = [], idx = [];
+  const upper = lipTube(LIP_UP_DY, LIP_UP_R, pos, idx);
+  const lower = lipTube(-LIP_LOW_DY, LIP_LOW_R, pos, idx);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.addGroup(0, upper, 0);        // material 0: `lips`
+  geo.addGroup(upper, lower, 1);    // material 1: `lipsShade`
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+// ---------------------------------------------------------------- the rig
 export function createMobu(opts = {}) {
-  const o = Object.assign({}, DEFAULTS, opts);
   const group = new THREE.Group();
+  group.rotation.order = 'YXZ';
 
-  const bodyMat = mat(o.bodyColor);
-  const lipsMat = mat(o.lipsColor, { roughness: 0.55 });
-  const blackMat = mat(0x1a1a1a, { roughness: 0.6 });
-  const shortsMat = makeShortsMaterial(o.shortsColor);
-  const footMat = mat(o.bodyColor);
+  const root = new THREE.Group(); // canonical 3.75-tall rig, scaled as one unit
+  root.scale.setScalar(MOBU_SCALE);
+  root.position.y = GROUND_Y;
+  group.add(root);
 
-  // --- body + head: one egg-shaped blob
-  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 20), bodyMat);
-  body.scale.set(0.55, 0.72, 0.5);
-  body.position.y = 0.95;
-  group.add(body);
+  const bodyMat = sharedMat(MOBU_PALETTE.bodyBase);
+  const lipsMat = sharedMat(MOBU_PALETTE.lips, { roughness: 0.55 });
+  const lipsShadeMat = sharedMat(MOBU_PALETTE.lipsShade, { roughness: 0.55 });
+  const inkMat = sharedMat(MOBU_PALETTE.ink, { roughness: 0.6 });
 
-  // --- ENORMOUS LIPS: big squashed torus grin on lower front of face
-  const lips = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.17, 12, 28), lipsMat);
-  lips.scale.set(1.0, 0.42, 1.0); // squash vertically -> wide flat grin ring
-  lips.rotation.x = Math.PI / 2; // ring opening faces +Z (the viewer)
-  lips.position.set(0, 0.62, 0.42);
-  group.add(lips);
+  // --- body + head: ONE profile of revolution, lathed once and cut in two at
+  // WAIST_Y. The two halves share a material and never move apart; they exist
+  // as two meshes so each keeps an honest bounding box.
+  const body = new THREE.Mesh(lathe(profileSlice(BODY_BOTTOM, WAIST_Y)), bodyMat);
+  const head = new THREE.Mesh(lathe(profileSlice(WAIST_Y, CROWN_Y)), bodyMat);
 
-  // --- eyes: tiny black beads above the lips
-  const eyeGeo = new THREE.SphereGeometry(0.045, 10, 8);
-  const eyeL = new THREE.Mesh(eyeGeo, blackMat);
-  eyeL.position.set(-0.16, 0.98, 0.44);
-  group.add(eyeL);
-  const eyeR = new THREE.Mesh(eyeGeo, blackMat);
-  eyeR.position.set(0.16, 0.98, 0.44);
-  group.add(eyeR);
+  const upper = new THREE.Group(); // bob / lean / tilt move this as one unit
+  upper.add(body, head);
 
-  // --- 3 short black hairs on top
-  const hairGeo = new THREE.CapsuleGeometry(0.012, 0.14, 3, 6);
-  const hairs = [];
-  for (let i = -1; i <= 1; i++) {
-    const h = new THREE.Mesh(hairGeo, blackMat);
-    h.position.set(i * 0.07, 1.62, 0.02);
-    h.rotation.z = -i * 0.35;
-    h.rotation.x = -0.15;
-    group.add(h);
-    hairs.push(h);
+  // --- the grin: a SIBLING of head, never its child (a child's bbox would
+  // flow into the head's). Vertices sit at absolute rig heights, so the pose
+  // engine only ever TRANSLATES this mesh — never scales it about the origin.
+  const lips = new THREE.Mesh(sausageLips(), [lipsMat, lipsShadeMat]);
+  upper.add(lips);
+
+  // --- eyes: two ink dots riding the head's surface; the PAIR is positioned
+  // at EYE_Y so any future squash flattens them in place, not toward y=0.
+  const eyeGeo = new THREE.SphereGeometry(1, 8, 6);
+  const eyes = new THREE.Group();
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(eyeGeo, inkMat);
+    eye.scale.set(0.085, 0.1, 0.085);
+    eye.position.set(sx * EYE_X, 0, EYE_Z);
+    eyes.add(eye);
   }
+  eyes.position.set(0, EYE_Y, 0);
+  upper.add(eyes);
 
-  // --- stubby arms: small capsules out sideways-down
-  const armGeo = new THREE.CapsuleGeometry(0.07, 0.22, 4, 8);
+  // --- tufts: three fat ink lozenges on the crown, LEANING BACK over it
+  // (about X), the outer two splayed (about Z). The group pivots at the crown.
+  const tufts = new THREE.Group();
+  tufts.position.set(0, TUFT_Y, 0);
+  const tipGeo = new THREE.SphereGeometry(1, 8, 6);
+  for (const [x, z, height, splay] of [[-0.24, -0.04, 0.24, 0.3], [0, -0.1, 0.3, 0], [0.24, -0.04, 0.24, -0.3]]) {
+    const tuft = new THREE.Group();
+    tuft.position.set(x, 0, z);
+    tuft.rotation.order = 'ZXY';
+    tuft.rotation.set(TUFT_LEAN, 0, splay);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, height, 6), inkMat);
+    stem.position.y = height / 2;
+    const tip = new THREE.Mesh(tipGeo, inkMat);
+    tip.scale.set(0.15, 0.16, 0.15);
+    tip.position.y = height;
+    tuft.add(stem, tip);
+    tufts.add(tuft);
+  }
+  upper.add(tufts);
+
+  // --- arms: CAPSULES (straight shaft, both ends capped with a same-radius
+  // sphere), resting out and slightly down. `hand` pivots at the arm tip for
+  // any future held props.
   const arms = [];
-  for (const side of [-1, 1]) {
-    const pivot = new THREE.Group();
-    pivot.position.set(side * 0.5, 0.95, 0.05);
-    const arm = new THREE.Mesh(armGeo, bodyMat);
-    arm.position.set(0, -0.16, 0);
-    pivot.add(arm);
-    pivot.rotation.z = side * 0.9; // out-down rest pose
-    group.add(pivot);
-    arms.push(pivot);
+  const hands = [];
+  const armShaftGeo = new THREE.CylinderGeometry(ARM_R, ARM_R, ARM_LEN, 10);
+  const armCapGeo = new THREE.SphereGeometry(ARM_R, 10, 8);
+  for (const sx of [-1, 1]) {
+    const arm = new THREE.Group();
+    arm.position.set(sx * SHOULDER_X, SHOULDER_Y, 0);
+    arm.rotation.z = sx * ARM_OUT_ROT;
+    const shaft = new THREE.Mesh(armShaftGeo, bodyMat);
+    shaft.position.y = -ARM_LEN / 2;
+    const capTop = new THREE.Mesh(armCapGeo, bodyMat);
+    const capEnd = new THREE.Mesh(armCapGeo, bodyMat);
+    capEnd.position.y = -ARM_LEN;
+    arm.add(shaft, capTop, capEnd);
+    const hand = new THREE.Group();
+    hand.position.set(0, -ARM_LEN, 0);
+    arm.add(hand);
+    upper.add(arm);
+    arms.push(arm);
+    hands.push(hand);
   }
 
-  // --- shorts: short wide cylinder around hips
-  const shorts = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.5, 0.42, 24, 1), shortsMat);
-  shorts.position.y = 0.72;
-  group.add(shorts);
+  root.add(upper);
 
-  // --- thick yellow feet
-  const feet = [];
-  const footGeo = new THREE.SphereGeometry(0.16, 12, 10);
-  for (const side of [-1, 1]) {
-    const pivot = new THREE.Group();
-    pivot.position.set(side * 0.2, 0.16, 0);
-    const foot = new THREE.Mesh(footGeo, footMat);
-    foot.scale.set(0.85, 0.7, 1.35); // chunky, longer forward
-    foot.position.set(0, 0, 0.08);
-    pivot.add(foot);
-    group.add(pivot);
-    feet.push(pivot);
+  // --- legs: pivots at hip height, SIBLINGS of upper — a torso bob must not
+  // lift the feet off the ground. Body-coloured; only the (unmodelled) sole
+  // is dark in the reference, and no camera sees it.
+  const legs = [];
+  const legShaftGeo = new THREE.CylinderGeometry(LEG_R, LEG_R, LEG_LEN, 8);
+  for (const sx of [-1, 1]) {
+    const leg = new THREE.Group();
+    leg.position.set(sx * LEG_X, LEG_LEN, 0);
+    const shaft = new THREE.Mesh(legShaftGeo, bodyMat);
+    shaft.position.y = -LEG_LEN / 2;
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), bodyMat);
+    foot.scale.set(LEG_R, LEG_R * 0.78, LEG_R * 1.1);
+    // centred so the rounded bottom just REACHES y=0 and never goes below it
+    foot.position.set(0, -LEG_LEN + LEG_R * 0.78, 0.05);
+    leg.add(shaft, foot);
+    root.add(leg);
+    legs.push(leg);
+  }
+
+  // --- garment pivots: empty groups AT THE RIG ORIGIN under `upper`, so
+  // builders work in absolute rig-local Y and call radiusAt(y) directly, and
+  // clothes travel with the torso through every pose.
+  const attach = {};
+  for (const name of ['hips', 'waist', 'chest', 'neck', 'back', 'head', 'face']) {
+    attach[name] = new THREE.Group();
+    upper.add(attach[name]);
   }
 
   setShadow(group);
 
+  const rig = {
+    root, upper, attach,
+    parts: {
+      body, head, lips, eyes, tufts,
+      armL: arms[0], armR: arms[1], handL: hands[0], handR: hands[1],
+      legL: legs[0], legR: legs[1],
+    },
+    radiusAt,
+  };
+
+  // ------------------------------------------------------- costume
+  function setCostume(spec) {
+    applyCostume(rig, spec);
+  }
+  setCostume(null); // the default: bare amber mobu in his classic shorts
+
   // ------------------------------------------------------- animation
-  // Heading (travel direction) lives on rotation.y; the run/idle cycles only
-  // add a wobble on top of it instead of overwriting it. YXZ order keeps the
-  // forward lean and body roll in the character's own facing frame.
-  group.rotation.order = 'YXZ';
+  // Heading (travel direction) lives on the OUTER group's rotation.y; the
+  // run/idle cycles only add a wobble on top. Lean/roll go on `upper`, so
+  // they play in the character's own facing frame.
   let heading = 0;
-  const BASE_BODY_Y = 0.95;
-  const BASE_LIPS_Y = 0.62;
-  const BASE_LIPS_SCALE_Y = 0.42;
 
   function animate(t, speed = 0) {
     const s = Math.min(1, Math.max(0, speed));
 
     if (s > 0.02) {
-      // --- run cycle
+      // --- run cycle: a bouncy waddle
       const f = t * 9;
-      // hop bounce
-      const hop = Math.abs(Math.sin(f)) * 0.09 * s;
-      group.position.y = hop;
-      // forward lean + wobble/roll
-      group.rotation.x = 0.12 * s;
-      group.rotation.z = Math.sin(f) * 0.07 * s;
-      group.rotation.y = heading + Math.sin(f * 0.5) * 0.05 * s;
+      group.position.y = GROUND_Y + Math.abs(Math.sin(f)) * 0.12 * s; // hop
+      upper.position.y = 0;
+      upper.rotation.x = 0.14 * s; // forward lean
+      upper.rotation.z = Math.sin(f) * 0.08 * s; // roll
+      group.rotation.y = heading + Math.sin(f * 0.5) * 0.06 * s;
 
-      // arms swing up/down alternately
-      arms[0].rotation.z = -0.9 + Math.sin(f) * 0.7 * s;
-      arms[1].rotation.z = 0.9 - Math.sin(f) * 0.7 * s;
+      arms[0].rotation.z = -ARM_OUT_ROT + Math.sin(f) * 0.6 * s;
+      arms[1].rotation.z = ARM_OUT_ROT - Math.sin(f) * 0.6 * s;
 
-      // feet alternate small kicks
-      feet[0].rotation.x = Math.sin(f) * 0.7 * s;
-      feet[1].rotation.x = -Math.sin(f) * 0.7 * s;
-      feet[0].position.y = 0.16 + Math.max(0, Math.sin(f)) * 0.12 * s;
-      feet[1].position.y = 0.16 + Math.max(0, -Math.sin(f)) * 0.12 * s;
+      legs[0].rotation.x = Math.sin(f) * 0.65 * s;
+      legs[1].rotation.x = -Math.sin(f) * 0.65 * s;
 
-      // lips / jowls jiggle
-      lips.position.y = BASE_LIPS_Y + Math.abs(Math.sin(f)) * 0.02 * s;
-      lips.scale.y = BASE_LIPS_SCALE_Y * (1 + Math.sin(f * 2) * 0.12 * s);
+      // jowls bounce; translate ONLY — the grin's vertices are at absolute
+      // heights, so scaling it about the rig origin would slide it into his
+      // hips.
+      lips.position.y = Math.abs(Math.sin(f)) * 0.035 * s;
+      tufts.rotation.x = Math.sin(f + 1.2) * 0.09 * s;
     } else {
-      // --- idle: gentle breathing bob + occasional lip flap
-      const breathe = Math.sin(t * 2) * 0.02;
-      group.position.y = Math.max(0, breathe) * 0.5;
-      group.rotation.x = 0;
-      group.rotation.z = Math.sin(t * 1.3) * 0.02;
-      group.rotation.y = heading + Math.sin(t * 0.9) * 0.04;
+      // --- idle: gentle breathing bob + occasional grin dip
+      group.position.y = GROUND_Y;
+      upper.position.y = Math.sin(t * 2) * 0.025;
+      upper.rotation.x = 0;
+      upper.rotation.z = Math.sin(t * 1.3) * 0.025;
+      group.rotation.y = heading + Math.sin(t * 0.9) * 0.05;
 
-      arms[0].rotation.z = -0.9 + Math.sin(t * 2) * 0.06;
-      arms[1].rotation.z = 0.9 - Math.sin(t * 2) * 0.06;
-      feet[0].rotation.x = 0;
-      feet[1].rotation.x = 0;
-      feet[0].position.y = 0.16;
-      feet[1].position.y = 0.16;
+      arms[0].rotation.z = -ARM_OUT_ROT - Math.sin(t * 2) * 0.05;
+      arms[1].rotation.z = ARM_OUT_ROT + Math.sin(t * 2) * 0.05;
+      legs[0].rotation.x = 0;
+      legs[1].rotation.x = 0;
 
-      // occasional lip flap every ~3s for ~0.5s
       const phase = t % 3;
-      const flap = phase < 0.5 ? Math.abs(Math.sin(phase * Math.PI / 0.5 * 3)) : 0;
-      lips.scale.y = BASE_LIPS_SCALE_Y * (1 - flap * 0.25);
-      lips.position.y = BASE_LIPS_Y - flap * 0.02;
+      const flap = phase < 0.5 ? Math.sin((phase / 0.5) * Math.PI) : 0;
+      lips.position.y = -flap * 0.05;
+      tufts.rotation.x = Math.sin(t * 0.7 + 1) * 0.04;
     }
-
-    // body squash from breathing always
-    body.position.y = BASE_BODY_Y + (group.position.y > 0 ? 0 : 0);
   }
 
-  return { group, animate, setHeading: (h) => { heading = h; } };
+  return { group, animate, setHeading: (h) => { heading = h; }, setCostume, rig };
+}
+
+/** Free a removed rig's GPU buffers. Materials cached in rig.js are shared
+ *  across the whole cast and are skipped (`userData.shared`). */
+export function disposeRig(rootObj) {
+  rootObj.traverse((o) => {
+    if (o.isMesh || o.isSprite) {
+      if (o.geometry) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m) continue;
+        if (m.map) m.map.dispose();
+        if (!m.userData?.shared) m.dispose();
+      }
+    }
+  });
 }
 
 // ---------------------------------------------------------------- watcher
@@ -277,6 +423,12 @@ export function createWatcher(opts = {}) {
   }
 
   return { group, animate, setHeading: (h) => { heading = h; } };
+}
+
+function mat(color, extra = {}) {
+  return new THREE.MeshStandardMaterial(
+    Object.assign({ color, roughness: 0.9, metalness: 0.0 }, extra)
+  );
 }
 
 // ---------------------------------------------------------------- name sprite

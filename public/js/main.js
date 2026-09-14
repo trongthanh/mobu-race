@@ -1,6 +1,7 @@
 import * as THREE from '../vendor/three.module.js';
 import { createWorld } from './environment.js';
-import { createMobu, createWatcher, makeNameSprite } from './mobu.js';
+import { createMobu, createWatcher, makeNameSprite, disposeRig, MOBU_SPRITE_Y } from './mobu.js';
+import { costumeFromSeed, costumeSeedFromText } from './costumes.js';
 import { createConfetti } from './confetti.js';
 
 // ---------- DOM ----------
@@ -49,7 +50,10 @@ function rebuildWorld(timeSec) {
   scene = next.scene;
   // Racers/watchers were parented to the old scene — recreate them.
   for (const r of state.racers) scene.add(r.group);
-  for (const [id] of state.watchers) state.watchers.delete(id);
+  for (const [id, w] of state.watchers) {
+    disposeRig(w.group);
+    state.watchers.delete(id);
+  }
   renderWatchers();
 }
 
@@ -344,6 +348,7 @@ function renderWatchers() {
   for (const [id, w] of state.watchers) {
     if (!ids.has(id)) {
       scene.remove(w.group);
+      disposeRig(w.group);
       state.watchers.delete(id);
     }
   }
@@ -377,7 +382,7 @@ function placeWatcher(w, index, total) {
 }
 
 // ---------- Race rendering ----------
-const RACER_COLORS = [0xffc93c, 0xff8c42, 0x7fd8be, 0xf472b6, 0x8ab6f9, 0xb98cf7, 0xff6b6b, 0x9bd45f, 0xf9d976, 0x5fc9c2, 0xe0a3ff, 0xa0a8b0];
+// Racer bodies stay the reference amber; outfits are what tell them apart.
 
 // Anti-overlap: mobus sidestep sideways when they crowd each other, and
 // finishers park in arrival order down the straight (a cooldown parade)
@@ -405,13 +410,18 @@ function buildRaceScene(msg) {
   rebuildWorld(msg.timeSec);
   camFocusInit = false; // re-aim the camera at the new pack without gliding
   state.timeSec = msg.timeSec;
-  let ri = 0;
   for (const r of msg.racers) {
-    const mobu = createMobu({ bodyColor: RACER_COLORS[ri % RACER_COLORS.length], shortsColor: RACER_COLORS[ri % RACER_COLORS.length] });
-    ri++;
+    const mobu = createMobu();
+    // Outfits are not controllable: the server rolls a fresh seed per racer
+    // at every create, and clients derive the identical outfit from it. The
+    // text-hash fallback keeps racers without a seed consistent too.
+    const seed = Number.isFinite(r.costumeSeed)
+      ? r.costumeSeed >>> 0
+      : costumeSeedFromText(r.id + '|' + r.name);
+    mobu.setCostume(costumeFromSeed(seed));
     const { group, animate } = mobu;
     const sprite = makeNameSprite(r.name, { height: 0.45 });
-    sprite.position.y = 2.4;
+    sprite.position.y = MOBU_SPRITE_Y;
     group.add(sprite);
     const lateral = Math.max(-3.3, Math.min(3.3, r.slot ? r.slot.lateral : 0));
     const startFrac = startFraction(r.slot ? r.slot.behind : 1);
@@ -464,16 +474,22 @@ function startRace(msg, elapsedOffset = 0) {
   el.raceHud.classList.remove('hidden');
   el.leaderboard.classList.remove('hidden');
   el.countdown.classList.add('hidden');
+  lbNextRefresh = 0;
   refreshSetupUI();
   updateLeaderboard();
 }
 
 function clearRaceScene() {
-  for (const r of state.racers) scene.remove(r.group);
+  for (const r of state.racers) {
+    scene.remove(r.group);
+    disposeRig(r.group);
+  }
   state.racers = [];
   state.plan = null;
   state.leaderId = null;
   state.winnerId = null;
+  lbRows.clear();
+  el.lbList.innerHTML = '';
   el.raceHud.classList.add('hidden');
   el.countdown.classList.add('hidden');
 }
@@ -502,6 +518,19 @@ function facingAt(progress, lateral = 0) {
   return Math.atan2(ahead.x - here.x, ahead.z - here.z);
 }
 
+// Leaderboard rows are keyed by racer id and kept across updates, so an order
+// change can animate: each row slides from its old slot to the new one (FLIP:
+// measure old tops, re-order, tween the inverted delta back to zero).
+const lbRows = new Map(); // racerId -> <li>
+let lbNextRefresh = 0;    // race-elapsed second for the next periodic refresh
+
+// A finisher's arrival time straight from the plan — the exact value the
+// server ranks the final results by.
+function planFinishTime(r) {
+  const kf = state.plan && state.plan[r.id];
+  return kf && kf.length ? kf[kf.length - 1][0] : (r.finishElapsed ?? Infinity);
+}
+
 function updateLeaderboard(finalResults = null) {
   let rows;
   if (finalResults && finalResults.length) {
@@ -509,19 +538,59 @@ function updateLeaderboard(finalResults = null) {
     // board once the race is over.
     rows = finalResults.map((res) => ({ ...res, finished: res.finishTime != null }));
   } else {
-    rows = state.racers.slice().sort((a, b) => b.progress - a.progress);
+    // Finishers lock into arrival order while the still-running field keeps
+    // ranking by live progress. (progress clamps at 1, so a plain sort leaves
+    // the finished pack tied in array order — rescrambling every time someone
+    // crosses — and then jumps to the server's order when race_finish lands.)
+    rows = state.racers.slice().sort((a, b) => {
+      const fa = a.finished ? planFinishTime(a) : Infinity;
+      const fb = b.finished ? planFinishTime(b) : Infinity;
+      if (fa !== fb) return fa - fb;
+      return b.progress - a.progress;
+    });
   }
+
+  // FIRST: where every row sits right now (rect includes any in-flight slide,
+  // so an update that interrupts one re-anchors it without a jump).
+  const before = new Map();
+  for (const li of el.lbList.children) {
+    before.set(li.dataset.id, li.getBoundingClientRect().top);
+  }
+
+  // THEN: rewrite the board in the new order. appendChild moves existing rows,
+  // so :first-child styling follows the gold spot automatically.
   el.lbList.innerHTML = '';
   rows.forEach((r, i) => {
-    const li = document.createElement('li');
-    const time = r.finishTime == null ? '' : ` — ${r.finishTime.toFixed(2)}s`;
+    let li = lbRows.get(r.id);
+    if (!li) {
+      li = document.createElement('li');
+      li.dataset.id = r.id;
+      lbRows.set(r.id, li);
+    }
+    const finishT = r.finishTime ?? (r.finished ? planFinishTime(r) : null);
+    const time = finishT == null ? '' : ` — ${finishT.toFixed(2)}s`;
     const marks =
       (r.finished ? ' 🏁' : '') +
       (r.id === state.leaderId && state.raceState === 'racing' ? ' 🏃' : '');
     li.textContent = `${i + 1}. ${r.name}${time}${marks}`;
-    if (i === 0) li.classList.add('first');
     el.lbList.appendChild(li);
   });
+  for (const [id, li] of lbRows) {
+    if (!li.isConnected) lbRows.delete(id);
+  }
+
+  // INVERT + PLAY: start each moved row at its old offset and let it ease in.
+  for (const li of el.lbList.children) {
+    const prevTop = before.get(li.dataset.id);
+    if (prevTop === undefined) continue;
+    const delta = prevTop - li.getBoundingClientRect().top;
+    if (Math.abs(delta) < 1) continue;
+    li.style.transition = 'none';
+    li.style.transform = `translateY(${delta}px)`;
+    li.getBoundingClientRect(); // flush so the slide starts from the old spot
+    li.style.transition = 'transform 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.08)';
+    li.style.transform = '';
+  }
 }
 
 function showCountdown(seconds) {
@@ -548,7 +617,7 @@ function showCongrats(msg) {
 }
 
 // ---------- Camera ----------
-let camMode = 'chase';
+let camMode = 'orbit'; // the scene opens with the free orbit view
 let orbitAzimuth = Math.PI * 0.75;
 let orbitElevation = 0.55;
 let orbitDistance = 30;
@@ -562,7 +631,7 @@ let lastPointer = null;
 // instead of snapping to the new leader.
 const camFocus = new THREE.Vector3();
 let camFocusInit = false;
-let camHeading = 0;
+let camHeading = Math.PI;
 
 function setCamMode(mode) {
   camMode = mode;
@@ -611,6 +680,7 @@ function updateCamera(dt) {
   // Ease the focus point toward the leader (~0.3s to settle after a swap).
   if (!camFocusInit) {
     camFocus.copy(leaderPos);
+    if (leader) camHeading = leader.group.rotation.y;
     camFocusInit = true;
   }
   camFocus.lerp(leaderPos, 1 - Math.exp(-3.5 * dt));
@@ -624,9 +694,26 @@ function updateCamera(dt) {
     el = 0.5 + dragEl;
     dist = 10.3 * zoom;
   } else if (camMode === 'front') {
-    az = camHeading + dragAz;
+    // Place camera on the track ahead of the leader, looking back along the
+    // track so the finish line stripe and banner run horizontally across the
+    // view with the racers visible beyond.
     el = 0.42 + dragEl;
     dist = 11 * zoom;
+    let aheadP = 0.03;
+    if (leader) {
+      const racing = state.raceState === 'racing' || state.raceState === 'finished';
+      if (racing && leader.progress !== undefined) {
+        aheadP = Math.min(0.97, leader.progress + 0.03);
+      } else if (leader.startFrac !== undefined) {
+        // Ready state: racers are at -startFrac, place camera past the line.
+        aheadP = Math.max(0.01, -leader.startFrac + 0.03);
+      }
+    }
+    const aheadPos = world.lanePoint(aheadP, 0);
+    const height = Math.max(1.5, Math.sin(el) * dist);
+    camera.position.set(aheadPos.x, height, aheadPos.z);
+    camera.lookAt(t.x, 1.2, t.z);
+    return;
   } else if (camMode === 'high') {
     // Cozy top-down-ish view over the leader.
     az = dragAz;
@@ -725,7 +812,11 @@ function tick() {
     }
     if (state.raceState === 'racing') {
       el.timer.textContent = `${Math.min(elapsed, state.timeSec).toFixed(2)}s`;
-      if (Math.floor(elapsed * 2) % 2 === 0) updateLeaderboard(); // 2x per second refresh
+      // Steady 2x-per-second refresh so order-change slides (0.45s) get to play.
+      if (elapsed >= lbNextRefresh) {
+        lbNextRefresh = Math.max(lbNextRefresh + 0.5, elapsed);
+        updateLeaderboard();
+      }
     }
   } else {
     // Paddock / on the line: spawned racers idle in place behind the start line.

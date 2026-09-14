@@ -68,6 +68,16 @@ html, body {
   pointer-events: auto;
 }
 
+/* The join card is the screen's welcome: pin it to the exact center
+   (.overlay.panel otherwise places it in normal flow, top-left). */
+#join.overlay.panel {
+  position: fixed;
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
 .overlay.big {
   pointer-events: none;
 }
@@ -315,6 +325,8 @@ label {
   font-size: 13px;
   padding: 3px 6px;
   border-radius: 8px;
+  /* gold :first-child highlight eases off/on as rows slide past each other */
+  transition: background-color 0.35s ease;
 }
 
 /* First place gets gold */

@@ -16,6 +16,7 @@ Open http://localhost:3000 in one tab per participant. Tests:
 ```bash
 pnpm test           # WebSocket protocol / race-logic integration test
 node tests/plan-check.mjs   # statistical check of pack pacing, drama, no stalls
+node tests/mobu-check.mjs   # headless mobu rig invariants (MOBU.md §10)
 ```
 
 ## How it works
@@ -29,6 +30,14 @@ node tests/plan-check.mjs   # statistical check of pack pacing, drama, no stalls
   start line. Step 2: the host hits "Start race" for the 3-2-1 countdown, and they're off.
   A quick generator fills the field with numbered racers (001, 002, …) in one click, and
   the last setup draft is kept in localStorage and recovered the next time the host joins.
+- **Costumes** — every racer gets an outfit: pants, top, head and face mixed and matched.
+  Tops are randomly nothing, shirt, t-shirt, trunk top or long coat — all of them cover
+  the torso up over the shoulders, dipping below the grin at the front; shirts add a
+  collar and buttons, tees and coats add sleeves that swing with the arms (the coat is
+  open at the chest and flares down past the shorts). Outfits are not controllable: every
+  "Create race" reshuffles them, seeded by the server so all clients render the same
+  wardrobe. The mobu mesh and wardrobe live in `public/js/rig.js` / `public/js/mobu.js` /
+  `public/js/costumes.js` (spec: `ref/MOBU.md`).
 - **Race** — the server decides the winner randomly, then paces the whole pack off one
   shared baseline so racers run close together, with staggered surge bumps for challengers
   so the lead changes hands mid-race without anyone stopping or "acting". Clients animate
@@ -50,8 +59,11 @@ Fonts), falling back to the system sans-serif stack.
 server/index.js        Node + express + ws game server (host, race state machine, plans)
 public/js/main.js      Client integration: connection, UI, cameras, race rendering
 public/js/environment.js  Procedural cozy world (oval track, trees, houses, lights)
-public/js/mobu.js      Procedural mobu racers, watcher avatars, name sprites
+public/js/rig.js       Mobu rig spec: canonical measurements, egg profile, materials
+public/js/mobu.js      Mobu mesh + pose engine, watcher avatars, name sprites
+public/js/costumes.js  Mix-and-match wardrobe (pants/top/head/face) + randomizer
 public/js/confetti.js  Winner celebration confetti (canvas, dependency-free)
 public/index.html      UI shell (join screen, host panel, HUD, celebration)
 tests/ws-test.mjs      End-to-end protocol test (host flow, plan validity, drama, results)
+tests/mobu-check.mjs   Headless mobu rig invariants (grin/head ratios, grounding, shells)
 ```

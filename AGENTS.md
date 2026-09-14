@@ -14,16 +14,27 @@ PLAN.md for the original brief.
   validity, leader drama, results). Update it whenever server messages/state change.
 - `node tests/plan-check.mjs` — statistical check of race-plan pacing (imports
   `buildPlan` from the server; keep that export intact).
+- `node tests/mobu-check.mjs` — headless mobu rig invariants from `ref/MOBU.md` §10
+  (grin/head ratios, grounded feet, ~3.75 canonical height, garment shells, pose
+  finiteness). Run it after touching `rig.js` / `mobu.js` / `costumes.js`.
 
 ## Layout
 
 - `server/index.js` — everything server-side: host role, state machine
   (`idle | ready | countdown | racing | finished`), `buildPlan` (winner pre-decided, pack
-  paced off one baseline with surge bumps), start slots (random lateral/behind meters).
+  paced off one baseline with surge bumps), start slots (random lateral/behind meters),
+  and costume-spec passthrough (validated structurally only — slot ids are client-side).
 - `public/js/main.js` — client: WS handling, race scene, cameras, HUD, localStorage.
 - `public/js/environment.js` — procedural world; `lanePoint(progress, lateral)` takes
   **meters from the centerline** (lane band is ±4.4; keep racers within ±3.3).
-- `public/js/mobu.js` — procedural mobu/watcher builders + canvas name sprites.
+- `public/js/rig.js` — canonical mobu measurements, egg-profile math (`radiusAt(y)`),
+  memoised materials. Ported from `ref/MOBU.md` — keep the relationship invariants there
+  intact (`HIP_R > HEAD_R`, `LIP_R = 1.1 × HEAD_R`, `DY ≈ 0.60 × R`).
+- `public/js/mobu.js` — mobu mesh + pose engine (lathed egg, two-sausage grin), watcher
+  avatars, name sprites, `disposeRig`. Racers are built in canonical units (3.75 tall)
+  and scaled by `MOBU_SCALE` as ONE unit.
+- `public/js/costumes.js` — mix-and-match wardrobe: pants / top / head / face slots,
+  each `[itemId, paletteIndex]`; `applyCostume`, `randomCostume`, seed-based outfits.
 - `public/js/confetti.js` — winner celebration (dependency-free canvas).
 - `public/vendor/three.module.js` — vendored Three.js; clients load plain ES modules from
   the static `public/` root — there is no build step, don't introduce one.
@@ -32,8 +43,11 @@ PLAN.md for the original brief.
 
 - **Server-authoritative sync**: every client animates the same race from the
   server-authored plan (`race_start` keyframes `[t, progress]`, linear interpolation).
-  Anything that must look identical across clients (start slots, winner, parking order)
-  derives from plan/server data — never from per-client `Math.random()`. Cosmetic
+  Anything that must look identical across clients (start slots, winner, parking order,
+  **costumes**) derives from plan/server data — never from per-client `Math.random()`.
+  Costumes are not controllable: every `create` rolls a fresh `costumeSeed` per racer and
+  clients derive the outfit via `costumeFromSeed(seed)`; a racer without a seed falls back
+  to `costumeSeedFromText(id|name)`, also deterministic across clients. Cosmetic
   randomness is OK only if it converges (e.g. the anti-overlap sidestep in `tick()`).
 - `progressAt()` exists duplicated in server, client, and plan-check — keep the
   implementations identical when touching one.
