@@ -3,11 +3,12 @@ import { createWorld } from './environment.js';
 import { createMobu, createWatcher, makeNameSprite, disposeRig, MOBU_SPRITE_Y } from './mobu.js';
 import { costumeFromSeed, costumeSeedFromText } from './costumes.js';
 import { createConfetti } from './confetti.js';
+import { buildPlan, randomSlots } from './race-plan.js';
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
-  join: $('join'), nameInput: $('nameInput'), joinBtn: $('joinBtn'),
+  join: $('join'), nameInput: $('nameInput'), joinBtn: $('joinBtn'), offlineBtn: $('offlineBtn'),
   hud: $('hud'), roleBadge: $('roleBadge'),
   userList: $('userList'), userPanel: $('userPanel'),
   setupPanel: $('setupPanel'), namesInput: $('namesInput'), timeInput: $('timeInput'), createBtn: $('createBtn'),
@@ -71,6 +72,7 @@ window.addEventListener('resize', () => {
 const state = {
   myId: null,
   isHost: false,
+  offline: false,
   users: [],
   hostId: null,
   setup: { names: [], timeSec: 60 },
@@ -115,7 +117,11 @@ function connect(name) {
 }
 
 function send(obj) {
-  if (wsOpen && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  if (state.offline) {
+    runOfflineCommand(obj);
+  } else if (wsOpen && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
 }
 
 function handle(msg) {
@@ -123,6 +129,7 @@ function handle(msg) {
     case 'welcome': {
       state.myId = msg.id;
       state.isHost = msg.isHost;
+      state.hostId = (msg.users.find((u) => u.isHost) || {}).id || null;
       state.users = msg.users;
       state.raceState = msg.state === 'countdown' ? 'counting' : msg.state;
       state.setup = msg.setup;
@@ -196,8 +203,108 @@ function handle(msg) {
   }
 }
 
+// ---------- Offline race controller ----------
+// Offline mode feeds the same client message handlers as a WebSocket server, but
+// keeps the complete race state, countdown and result timer in this tab only.
+const offlineTimers = new Set();
+let offlineRace = null;
+
+function setOfflineTimer(fn, delay) {
+  const id = setTimeout(() => {
+    offlineTimers.delete(id);
+    fn();
+  }, delay);
+  offlineTimers.add(id);
+  return id;
+}
+
+function clearOfflineTimers() {
+  for (const id of offlineTimers) clearTimeout(id);
+  offlineTimers.clear();
+}
+
+function offlineSetup(msg) {
+  const names = (Array.isArray(msg.names) ? msg.names : [])
+    .filter((name) => typeof name === 'string' && name.trim())
+    .map((name) => name.trim().slice(0, 20))
+    .slice(0, 12);
+  const timeSec = TIME_STEPS.includes(Number(msg.timeSec)) ? Number(msg.timeSec) : 60;
+  return { names, timeSec };
+}
+
+function runOfflineCommand(msg) {
+  if (!state.offline) return;
+  switch (msg.type) {
+    case 'setup': {
+      if (state.raceState !== 'idle') return;
+      const setup = offlineSetup(msg);
+      handle({ type: 'setup_updated', setup });
+      return;
+    }
+    case 'create': {
+      if (state.raceState !== 'idle' || state.setup.names.length < 2) return;
+      const slots = randomSlots(state.setup.names.length);
+      const racers = state.setup.names.map((name, i) => ({
+        id: `r${i}`,
+        name,
+        lane: i,
+        slot: slots[i],
+        costumeSeed: Math.floor(Math.random() * 0x100000000),
+      }));
+      offlineRace = { racers, timeSec: state.setup.timeSec, plan: null, winnerId: null };
+      handle({ type: 'race_created', timeSec: offlineRace.timeSec, racers });
+      return;
+    }
+    case 'start': {
+      if (state.raceState !== 'ready' || !offlineRace) return;
+      handle({ type: 'countdown', seconds: 3 });
+      setOfflineTimer(() => handle({ type: 'countdown', seconds: 2 }), 1000);
+      setOfflineTimer(() => handle({ type: 'countdown', seconds: 1 }), 2000);
+      setOfflineTimer(startOfflineRace, 3000);
+      return;
+    }
+    case 'reset': {
+      if (state.raceState !== 'ready' && state.raceState !== 'finished') return;
+      clearOfflineTimers();
+      offlineRace = null;
+      handle({ type: 'reset', setup: { ...state.setup, names: state.setup.names.slice() } });
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+function startOfflineRace() {
+  if (!offlineRace || state.raceState !== 'counting') return;
+  const { plan, winnerIdx } = buildPlan(offlineRace.racers.map((r) => r.name), offlineRace.timeSec);
+  offlineRace.plan = plan;
+  offlineRace.winnerId = `r${winnerIdx}`;
+  handle({
+    type: 'race_start',
+    timeSec: offlineRace.timeSec,
+    racers: offlineRace.racers,
+    plan,
+    winnerId: offlineRace.winnerId,
+  });
+  const lastFinish = Math.max(...offlineRace.racers.map((r) => plan[r.id][plan[r.id].length - 1][0]));
+  setOfflineTimer(finishOfflineRace, lastFinish * 1000 + 600);
+}
+
+function finishOfflineRace() {
+  if (!offlineRace || state.raceState !== 'racing') return;
+  const results = offlineRace.racers.map((r) => ({
+    id: r.id,
+    name: r.name,
+    finishTime: offlineRace.plan[r.id][offlineRace.plan[r.id].length - 1][0],
+    progress: 1,
+  })).sort((a, b) => a.finishTime - b.finishTime);
+  handle({ type: 'race_finish', results, winnerId: offlineRace.winnerId });
+}
+
 // ---------- UI wiring ----------
 el.joinBtn.addEventListener('click', join);
+el.offlineBtn.addEventListener('click', playOffline);
 el.nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
 
 // ---------- visitor name (localStorage) ----------
@@ -223,6 +330,22 @@ function join() {
   el.join.classList.add('hidden');
   el.hud.classList.remove('hidden');
   connect(name || undefined);
+}
+
+function playOffline() {
+  const name = el.nameInput.value.trim() || 'Offline Host';
+  saveVisitorName(name);
+  state.offline = true;
+  el.join.classList.add('hidden');
+  el.hud.classList.remove('hidden');
+  handle({
+    type: 'welcome',
+    id: 'offline-host',
+    isHost: true,
+    users: [{ id: 'offline-host', name, isHost: true }],
+    state: 'idle',
+    setup: { names: [], timeSec: 60 },
+  });
 }
 
 el.namesInput.addEventListener('input', sendSetup);
@@ -291,7 +414,7 @@ camBtns.forEach((b) => b.addEventListener('click', () => setCamMode(b.dataset.ca
 
 function refreshSetupUI() {
   el.roleBadge.textContent = state.isHost
-    ? '👑 You are the Host'
+    ? (state.offline ? '👑 Offline host · this tab only' : '👑 You are the Host')
     : `Watching: ${myName()}`;
   const phase = state.raceState; // idle | ready | counting | racing | finished
   const raceOn = phase === 'counting' || phase === 'racing' || phase === 'finished';

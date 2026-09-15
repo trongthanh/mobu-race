@@ -160,6 +160,14 @@ label, .field-label {
   text-align: center;
 }
 
+#offlineHint {
+  color: #a07840;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: -7px;
+  text-align: center;
+}
+
 /* ---------- Topbar ---------- */
 #topbar {
   position: fixed;

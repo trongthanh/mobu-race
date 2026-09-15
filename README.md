@@ -11,7 +11,7 @@ pnpm install
 pnpm start          # serves on http://localhost:3000
 ```
 
-Open http://localhost:3000 in one tab per participant. Tests:
+Open http://localhost:3000 in one tab per participant. Or, on the welcome card, choose **Play offline in this tab** to host and run a complete private race with no WebSocket connection. Tests:
 
 ```bash
 pnpm test           # WebSocket protocol / race-logic integration test
@@ -48,6 +48,7 @@ fallback. The production build replaces it with the Worker endpoint.
 
 ## How it works
 
+- **Offline mode** — the welcome card can start a private, standalone race in the current tab. The browser generates the same paced race plan, countdown, grid, costumes, results and celebration locally; it never opens a WebSocket or admits spectators.
 - **Host** — the first visitor to connect becomes the host (👑). They can hand the host role
   to any spectator ("Make host"); if the host leaves, the earliest-connected visitor is
   promoted automatically.
@@ -84,7 +85,8 @@ Fonts), falling back to the system sans-serif stack.
 
 ```
 server/index.js        Node + express + ws game server (host, race state machine, plans)
-public/js/main.js      Client integration: connection, UI, cameras, race rendering
+public/js/main.js      Client integration: online/offline control, UI, cameras, race rendering
+public/js/race-plan.js Shared offline race-plan and start-grid generator
 public/js/environment.js  Procedural cozy world (oval track, trees, houses, lights)
 public/js/rig.js       Mobu rig spec: canonical measurements, egg profile, materials
 public/js/mobu.js      Mobu mesh + pose engine, watcher avatars, name sprites
