@@ -353,7 +353,12 @@ export function createWorld(opts = {}) {
   const bFontSize = 100;
   const bFont = `800 ${bFontSize}px 'Reddit Sans', 'Trebuchet MS', sans-serif`;
   const bannerTextH = 1.06;
-  const bannerTextW = halfW * 2 + 0.4 - 0.5; // fabric face minus a small margin
+  // Leave room for the supplied mobu mark on the left side of each banner face.
+  const bannerImageW = 1.0;
+  const bannerImageGap = 0.18;
+  const bannerTextW = halfW * 2 + 0.4 - 0.5 - bannerImageW - bannerImageGap;
+  const bannerTextZ = stripeZ + (bannerImageW + bannerImageGap) / 2;
+  const bannerImageZ = stripeZ - halfW + 0.3 + bannerImageW / 2;
   const bc = document.createElement('canvas');
   const bctx = bc.getContext('2d');
   bctx.font = bFont;
@@ -398,11 +403,24 @@ export function createWorld(opts = {}) {
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawBannerText);
   const bannerTextMat = new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true });
   const bannerTextGeo = new THREE.PlaneGeometry(bannerTextW, bannerTextH);
+  const bannerImageTex = new THREE.TextureLoader().load('/mobu-race.png');
+  bannerImageTex.colorSpace = THREE.SRGBColorSpace;
+  const bannerImageMat = new THREE.MeshBasicMaterial({
+    map: bannerImageTex,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  const bannerImageGeo = new THREE.PlaneGeometry(bannerImageW, bannerTextH);
   for (const [tx, rotY] of [[-0.195, Math.PI / 2], [-0.305, -Math.PI / 2]]) {
     const label = new THREE.Mesh(bannerTextGeo, bannerTextMat);
-    label.position.set(tx, 3.6, stripeZ);
+    label.position.set(tx, 3.6, bannerTextZ);
     label.rotation.y = rotY;
     group.add(label);
+
+    const mark = new THREE.Mesh(bannerImageGeo, bannerImageMat);
+    mark.position.set(tx, 3.6, bannerImageZ);
+    mark.rotation.y = rotY;
+    group.add(mark);
   }
 
   // ---------- scenery ----------
