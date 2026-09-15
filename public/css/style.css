@@ -403,7 +403,8 @@ label, .field-label {
 
   #userPanel {
     width: 170px;
-    max-height: 45vh;
+    /* Keep the setup controls above the camera panel on short viewports. */
+    max-height: calc(100vh - 156px);
     font-size: 13px;
   }
 
