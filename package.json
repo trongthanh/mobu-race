@@ -8,7 +8,10 @@
   },
   "scripts": {
     "test": "node tests/ws-test.mjs",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "build:pages": "node scripts/build-pages.mjs",
+    "deploy:worker": "wrangler deploy --config cloudflare/wrangler.jsonc",
+    "deploy:pages": "pnpm run build:pages && wrangler pages deploy dist --project-name ${CLOUDFLARE_PAGES_PROJECT:-mobu-race}"
   },
   "keywords": [],
   "author": "",
@@ -19,5 +22,8 @@
     "express": "^5.2.1",
     "three": "^0.186.0",
     "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.131.1"
   }
 }

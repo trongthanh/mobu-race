@@ -19,6 +19,33 @@ node tests/plan-check.mjs   # statistical check of pack pacing, drama, no stalls
 node tests/mobu-check.mjs   # headless mobu rig invariants (MOBU.md §10)
 ```
 
+## Cloudflare Pages deployment
+
+Yes—use **Cloudflare Pages for the static Three.js client** and the included
+**Cloudflare Worker + Durable Object for the authoritative WebSocket room**. Pages alone
+cannot run this project's Express/`ws` server or share live room state between visitors.
+
+1. Authenticate, then choose a globally unique Worker name in
+   `cloudflare/wrangler.jsonc` and a Pages project name (the `mobu-race` default in
+   `package.json` is overridable with `CLOUDFLARE_PAGES_PROJECT`).
+   ```bash
+   pnpm exec wrangler login
+   pnpm run deploy:worker
+   ```
+2. Copy the Worker URL printed by Wrangler (for example,
+   `https://mobu-race-realtime.<account>.workers.dev`) and deploy the static site with it:
+   ```bash
+   MOBU_RACE_WS_URL=https://mobu-race-realtime.<account>.workers.dev/ws pnpm run deploy:pages
+   ```
+   The build converts `https` to `wss` and writes the endpoint into the generated
+   `dist/config.js`; do not commit `dist/`.
+3. For a Git-connected Pages project, set the Pages build command to
+   `pnpm run build:pages`, build output directory to `dist`, and add
+   `MOBU_RACE_WS_URL` as a Pages build variable. Deploy the Worker first.
+
+The client retains same-origin WebSockets for `pnpm start`; `public/config.js` is its local
+fallback. The production build replaces it with the Worker endpoint.
+
 ## How it works
 
 - **Host** — the first visitor to connect becomes the host (👑). They can hand the host role

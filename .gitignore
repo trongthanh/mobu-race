@@ -1,7 +1,14 @@
 TODO.md
 .pi/tasks/
+.pi/delegate/
 
 node_modules/
+dist/
+
+# Cloudflare Wrangler local state and development secrets
+.wrangler/
+.dev.vars
+.dev.vars.*
 
 *.glb
 bin/
