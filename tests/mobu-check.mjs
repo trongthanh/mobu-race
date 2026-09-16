@@ -3,7 +3,7 @@
 import assert from 'node:assert';
 import * as THREE from '../public/vendor/three.module.js';
 import { createMobu, disposeRig } from '../public/js/mobu.js';
-import { radiusAt, BODY_PROFILE, ARM_LEN, ARM_OUT_ROT } from '../public/js/rig.js';
+import { radiusAt, sharedMat, ARM_LEN, LIP_Y } from '../public/js/rig.js';
 import { WARDROBE, SLOT_KEYS, normalizeCostume, randomCostume, costumeFromSeed, applyCostume } from '../public/js/costumes.js';
 
 function boxOf(obj) {
@@ -47,6 +47,66 @@ function main() {
   assert.ok(torsoW > headW, `pear, not lollipop: torso ${torsoW.toFixed(2)} > head ${headW.toFixed(2)}`);
   console.log(`grin: width ${lipW.toFixed(2)} (${(lipW / headW).toFixed(2)}× head), tall ${(lipBox.max.y - lipBox.min.y).toFixed(2)}, protrudes z ${lipBox.max.z.toFixed(2)} — OK`);
 
+  // A single watertight mouth, not intersecting closed tubes. Every edge is
+  // used twice and every vertex belongs to the same connected component.
+  const geometry = lips.geometry;
+  const positions = geometry.attributes.position;
+  const indices = geometry.index.array;
+  const edges = new Map();
+  const neighbors = Array.from({ length: positions.count }, () => []);
+  for (let i = 0; i < indices.length; i += 3) {
+    for (let j = 0; j < 3; j++) {
+      const a = indices[i + j], b = indices[i + (j + 1) % 3];
+      const key = `${Math.min(a, b)}:${Math.max(a, b)}`;
+      const edge = edges.get(key) || { count: 0, winding: 0 };
+      edge.count++;
+      edge.winding += a < b ? 1 : -1;
+      edges.set(key, edge);
+      neighbors[a].push(b);
+      neighbors[b].push(a);
+    }
+  }
+  for (const edge of edges.values()) {
+    assert.equal(edge.count, 2, 'mouth is closed, with no non-manifold edges');
+    assert.equal(edge.winding, 0, 'adjacent mouth triangles agree on winding');
+  }
+  const seen = new Set([0]), queue = [0];
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of neighbors[queue[i]]) if (!seen.has(next)) { seen.add(next); queue.push(next); }
+  }
+  assert.equal(seen.size, positions.count, 'lips form ONE joined surface');
+  // At the front centre, two orange crests protrude beyond the shallow crease.
+  let creaseZ = 0, crestZ = 0;
+  for (let i = 0; i < positions.count; i++) {
+    if (Math.abs(positions.getX(i)) > 0.025) continue;
+    const y = Math.abs(positions.getY(i) - LIP_Y), z = positions.getZ(i);
+    if (y < 0.01) creaseZ = Math.max(creaseZ, z);
+    if (y > 0.06 && y < 0.25) crestZ = Math.max(crestZ, z);
+  }
+  assert.ok(crestZ - creaseZ > 0.025 && crestZ - creaseZ < 0.12, 'smile crease is sculpted but shallow');
+  assert.ok(lips.material.isMeshStandardMaterial && !lips.material.flatShading, 'smooth vinyl mouth');
+  assert.notStrictEqual(sharedMat(0xffffff), sharedMat(0xffffff, { vertexColors: true }), 'vertex colour option is cached separately');
+  assert.notStrictEqual(sharedMat(0xffffff), sharedMat(0xffffff, { roughness: 0.9 }), 'roughness option is cached separately');
+
+  // Smile is a real shape target (including normals), not a translation/scale.
+  const target = geometry.morphAttributes.position[0];
+  assert.equal(target.count, positions.count, 'smile preserves topology');
+  assert.equal(geometry.morphAttributes.normal[0].count, positions.count);
+  let change = 0;
+  for (let i = 0; i < target.array.length; i++) {
+    assert.ok(Number.isFinite(target.array[i]), 'finite smile target');
+    change = Math.max(change, Math.abs(target.array[i] - positions.array[i]));
+  }
+  assert.ok(change > 0.08, 'smile visibly changes the sculpt');
+  for (const [input, expected] of [[-1, 0], [0.5, 0.5], [2, 1], [NaN, 0]]) {
+    mobu.setSmile(input);
+    mobu.animate(0, 0);
+    assert.equal(lips.morphTargetInfluences[0], expected, 'bounded smile amount');
+    assert.equal(lips.scale.y, 1, 'never scale absolute-height mouth vertices');
+  }
+  mobu.setSmile(0);
+  console.log('mouth: joined manifold, sculpted crease, smile morph + normals — OK');
+
   // 4-5. grounded feet, canonical height
   const rootBox = boxOf(rig.root);
   assert.ok(rootBox.min.y > -0.02, `feet on the ground (min.y ${rootBox.min.y.toFixed(3)})`);
@@ -64,7 +124,9 @@ function main() {
       mobu.animate(t, speed);
       group.updateMatrixWorld(true);
       checkFinite(group, `pose(speed=${speed}, t=${t})`);
-      assert.ok(group.position.y >= -0.001, `pose keeps the rig above the ground at t=${t} speed=${speed}`);
+      for (const foot of [rig.parts.legL, rig.parts.legR]) {
+        assert.ok(boxOf(foot).min.y >= 0.049, `foot stays above dirt at t=${t} speed=${speed}`);
+      }
     }
   }
   console.log('poses: finite transforms at rest/run speeds — OK');
@@ -76,11 +138,18 @@ function main() {
     mobu.animate(t, 0);
     group.updateMatrixWorld(true);
     checkFinite(group, `celebrate(t=${t})`);
-    assert.ok(group.position.y >= -0.001, `celebrate keeps the rig above the ground at t=${t}`);
+    assert.ok(group.position.y >= 0.049, `celebrate keeps the rig above the ground at t=${t}`);
+    assert.ok(lips.morphTargetInfluences[0] >= 0.9, 'winner smiles');
+    assert.ok(rig.parts.happyEyes.visible && !rig.parts.eyes.visible, 'winner has happy eyes');
+    assert.ok(Math.abs(rig.parts.armL.rotation.z) > Math.PI / 2, 'celebration raises arms');
   }
+  mobu.animate(0, 1);
+  assert.equal(lips.morphTargetInfluences[0], 0, 'celebration waits until racer stops');
   mobu.setCelebrating(false);
   mobu.animate(0, 0);
-  console.log('celebrate pose: finite transforms, grounded — OK');
+  assert.ok(rig.parts.eyes.visible && !rig.parts.happyEyes.visible, 'idle restores dot eyes');
+  assert.equal(lips.morphTargetInfluences[0], 0, 'idle restores requested smile');
+  console.log('celebrate pose: finite transforms, grounded, expressive, resets cleanly — OK');
 
   // 8. the egg profile is one smooth silhouette: no pinched neck
   let minWidth = Infinity;

@@ -17,7 +17,7 @@ export const SLOT_KEYS = ['pants', 'top', 'head', 'face'];
 
 // Slot 0 is the signature shorts orange from the reference product shot.
 export const CLOTH_COLORS = [
-  0xf5731f, 0xe4574c, 0xf472b6, 0xb98cf7, 0x8ab6f9, 0x5fc9c2,
+  0xffb008, 0xe4574c, 0xf472b6, 0xb98cf7, 0x8ab6f9, 0x5fc9c2,
   0x9bd45f, 0xf9d976, 0xf7a81c, 0xfff4e0, 0x8a5a33, 0x495867,
 ];
 
@@ -86,14 +86,15 @@ const shortsHem = (yBot) => (th) =>
 function drawstring(y) {
   const g = new THREE.Group();
   const ink = sharedMat(MOBU_PALETTE.ink, { roughness: 0.6 });
-  const r = radiusAt(y) + 0.06;
+  const r = radiusAt(y) + 0.105;
   for (const sx of [-1, 1]) {
     const string_ = tubeBetween(
       new THREE.Vector3(sx * 0.05, y + 0.02, r),
       new THREE.Vector3(sx * 0.17, y - 0.13, r + 0.03),
-      0.022, ink);
+      0.026, ink);
     g.add(string_);
   }
+  g.add(tubeBetween(new THREE.Vector3(0, y, r + 0.01), new THREE.Vector3(0.035, y - 0.19, r + 0.025), 0.025, ink));
   return g;
 }
 
@@ -101,42 +102,97 @@ function drawstring(y) {
  *  Built in a local frame where +Z faces outward, then glued to the surface. */
 function blobDecal(theta, y, tickColor) {
   const g = new THREE.Group();
-  const blob = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), sharedMat(0xfffdf2, { roughness: 0.8 }));
-  blob.scale.set(0.17, 0.14, 0.05);
+  const blob = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), sharedMat(0xfffdf2, { roughness: 0.8 }));
+  blob.scale.set(0.185, 0.205, 0.025);
   blob.castShadow = true;
   g.add(blob);
-  // one open arc reads as the reference's check-mark squiggle
-  const tick = new THREE.Mesh(
-    new THREE.TorusGeometry(0.062, 0.018, 5, 10, 4.3),
-    sharedMat(tickColor, { roughness: 0.8 }));
-  tick.position.z = 0.045;
-  tick.rotation.z = 0.8;
-  tick.castShadow = true;
-  g.add(tick);
-  const p = surfacePoint(y, theta, 0.075);
-  g.position.copy(p);
-  g.lookAt(p.x * 2, p.y * 2, p.z * 2);
+  // Two rounded strokes, not a torus/C: the photo has unmistakable check marks.
+  const points = [new THREE.Vector3(-0.095, -0.005, 0.029), new THREE.Vector3(-0.025, -0.073, 0.032), new THREE.Vector3(0.095, 0.093, 0.029)];
+  const mat = sharedMat(tickColor, { roughness: 0.8 });
+  for (let i = 1; i < points.length; i++) g.add(tubeBetween(points[i - 1], points[i], 0.025, mat, 10));
+  const capGeo = new THREE.SphereGeometry(0.025, 8, 6);
+  for (const point of points) {
+    const cap = new THREE.Mesh(capGeo, mat);
+    cap.position.copy(point);
+    g.add(cap);
+  }
+  // Project every patch/tick vertex onto the SAME tapered shorts shell. A
+  // rigid flat decal at radiusAt(centreY) sinks into the minimum-radius hem.
+  for (const mesh of g.children) {
+    mesh.updateMatrix();
+    const geometry = mesh.geometry.clone();
+    geometry.applyMatrix4(mesh.matrix);
+    const pos = geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const yy = y + pos.getY(i);
+      const v = THREE.MathUtils.clamp((1.25 - yy) / (1.25 - 0.36), 0, 1);
+      const shellR = Math.max(0.97 - 0.04 * v, radiusAt(yy) + 0.05);
+      const angle = theta + pos.getX(i) / shellR;
+      const r = shellR + 0.009 + pos.getZ(i);
+      pos.setXYZ(i, r * Math.sin(angle), yy, r * Math.cos(angle));
+    }
+    geometry.computeVertexNormals();
+    mesh.geometry.dispose();
+    mesh.geometry = geometry;
+    mesh.position.set(0, 0, 0);
+    mesh.rotation.set(0, 0, 0);
+    mesh.scale.set(1, 1, 1);
+  }
   return g;
+}
+
+// Bake rigid same-material decorations together: ten tick patches should not
+// cost sixty draw calls per racer. These meshes all move with the same garment.
+function mergeGarment(group) {
+  group.updateMatrixWorld(true);
+  const batches = new Map(), disposable = new Set();
+  group.traverse((mesh) => {
+    if (!mesh.isMesh) return;
+    let batch = batches.get(mesh.material);
+    if (!batch) { batch = { positions: [], normals: [], indices: [] }; batches.set(mesh.material, batch); }
+    const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+    const offset = batch.positions.length / 3;
+    batch.positions.push(...geometry.attributes.position.array);
+    batch.normals.push(...geometry.attributes.normal.array);
+    const index = geometry.index;
+    for (let i = 0; i < (index?.count ?? geometry.attributes.position.count); i++) {
+      batch.indices.push(offset + (index ? index.getX(i) : i));
+    }
+    geometry.dispose();
+    disposable.add(mesh.geometry);
+  });
+  for (const geometry of disposable) geometry.dispose();
+  group.clear();
+  for (const [material, batch] of batches) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(batch.positions, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(batch.normals, 3));
+    geometry.setIndex(batch.indices);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    group.add(mesh);
+  }
+  return group;
 }
 
 // ---------------------------------------------------------------- pants
 function classicShorts(rig, color) {
   const g = new THREE.Group();
   const main = sharedMat(color);
-  const cuffMat = sharedMat(shade(color, 0.72));
   g.add(shell({
     yTop: 1.25, yBot: 0.36, hem: shortsHem(0.36),
-    gap: 0.05, minR: (v) => 0.97 - 0.04 * v, rows: 10, cols: 26, material: main,
+    gap: 0.05, minR: (v) => 0.97 - 0.04 * v, rows: 14, cols: 48, material: main,
   }));
   g.add(shell({
-    yTop: 0.46, yBot: 0.36, hem: shortsHem(0.36),
-    gap: 0.055, minR: (v) => 0.97 - 0.04 * v, rows: 2, cols: 26, material: cuffMat,
+    yTop: 1.27, yBot: 1.15, gap: 0.067,
+    rows: 2, cols: 48, material: main,
   }));
-  g.add(drawstring(1.19));
-  for (const th of [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4]) {
-    g.add(blobDecal(th, 0.86, color));
+  g.add(drawstring(1.10));
+  for (let i = 0; i < 10; i++) {
+    const th = (i + 0.5) * Math.PI * 2 / 10;
+    g.add(blobDecal(th, i % 2 ? 0.87 : 0.64, color));
   }
-  return g;
+  return mergeGarment(g);
 }
 
 function plainShorts(rig, color) {

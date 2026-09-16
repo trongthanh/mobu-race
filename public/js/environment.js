@@ -1123,8 +1123,11 @@ export function createWorld(opts = {}) {
     const poleTopY = 4;
     const poleZN = stripeZ - halfW;
     const poleZS = stripeZ + halfW;
+    // Keep the side bunting anchors safely in the infield. The old positions
+    // were based on the unexpanded ellipse, so they landed on the racing lane
+    // at some track scales.
     for (const sx of [-1, 1]) {
-      const ex = sx * a * 1.05, ez = b * 0.9;
+      const ex = sx * innerA * 0.72, ez = innerB * 0.72;
       post(ex, ez);
       pennantLine(-0.25, poleTopY, poleZN, ex, 1.35, ez);
     }

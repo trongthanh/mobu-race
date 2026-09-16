@@ -20,7 +20,7 @@ PLAN.md for the original brief.
 
 ## Verification
 
-- After implementing a user-visible change, verify it in the browser with Chrome DevTools MCP. For a full implementation check, always hand off to a background agent pinned to `openai-codex/gpt-5.6-luna`; it must exercise the relevant flow, inspect the rendered scene, and check the console. For a quick check, the primary agent may call Chrome DevTools MCP directly.
+- After implementing a user-visible change, verify it in the browser with Chrome DevTools MCP. For a full implementation check, always hand off to a background agent pinned to `openai-codex/gpt-5.6-luna`; it must exercise the relevant flow, inspect the rendered scene, and check the console. For small, targeted checks (for example, a generator button's label, layout, or click action), the primary agent should use Chrome DevTools MCP directly; do not delegate these quick checks.
 
 ## Layout
 

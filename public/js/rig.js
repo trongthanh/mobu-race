@@ -8,25 +8,25 @@ import * as THREE from '../vendor/three.module.js';
 export const MOBU_PALETTE = {
   ink: 0x231f20,       // eyes, tufts — never #000000
   bodyLight: 0xffc24a, // declared for completeness; the key light does this
-  bodyBase: 0xf7a81c,  // the whole body, head, arms and legs
+  bodyBase: 0xffbb08,  // the whole body, head, arms and legs
   bodyShade: 0xe08a00,
-  lips: 0xf5731f,      // the upper lip tube
-  lipsShade: 0xd65a12, // the lower lip tube
+  lips: 0xff7908,      // one orange vinyl surface; lighting shapes the lower lip
+  lipsShade: 0xc13d05, // warm occlusion tint inside the smile crease
   white: 0xffffff,
 };
 
-// Memoised materials: one flat Lambert per colour for the whole cast. Cached
-// materials are flagged `shared` so disposeRig() never disposes them.
+// Smooth toy-vinyl materials, shared across the cast. Include all supported
+// options in the key: the vertex-coloured mouth must not tint other orange parts.
 const matCache = new Map();
 
 export function sharedMat(hex, opts = {}) {
   const side = opts.side ?? THREE.FrontSide;
-  const key = `${hex}|${side}`;
+  const roughness = opts.roughness ?? 0.48;
+  const vertexColors = opts.vertexColors ?? false;
+  const key = `${hex}|${side}|${roughness}|${vertexColors}`;
   if (!matCache.has(key)) {
-    const m = new THREE.MeshLambertMaterial({
-      color: hex,
-      flatShading: true,
-      side,
+    const m = new THREE.MeshStandardMaterial({
+      color: hex, roughness, metalness: 0, vertexColors, side,
     });
     m.userData.shared = true;
     matCache.set(key, m);
@@ -61,24 +61,27 @@ export const ARM_R = 0.31;
 export const ARM_OUT_ROT = 1.25; // rad from straight down: arms rest out, ~18° below horizontal
 
 // ---------------------------------------------------------------- the grin
+// Section half-heights = DY + R; both halves round into END_R at the cheeks.
+// The old tube-offset ratio is retained for garment neckline compatibility;
+// the actual closed, grooved surface now lives in mobu-mouth.js.
 export const LIP_Y = 2.21;       // the crease line's height at the centre
 export const LIP_R = HEAD_R * 1.1; // the collar ring the tubes' centre lines run on
 export const LIP_THETA = 1.15;   // ±66°: half-angle of the sweep
-export const LIP_UP_DY = 0.126;  // upper tube: offset from the crease…
-export const LIP_UP_R = 0.21;    // …and radius
-export const LIP_LOW_DY = 0.175; // lower tube: the fuller half, 1.4x the upper
-export const LIP_LOW_R = 0.29;
+export const LIP_UP_DY = 0.15;  // upper tube: offset from the crease…
+export const LIP_UP_R = 0.25;    // …and radius
+export const LIP_LOW_DY = 0.192; // lower tube: the fuller half, 1.4x the upper
+export const LIP_LOW_R = 0.32;
 export const LIP_END_R = 0.31;   // the shared corner-bulb radius BOTH tubes run to
 export const LIP_CURL = 0.45;    // how far the corners ride up
 export const LIP_FUSE = 0.7;     // how far the two tubes converge into one bulb at the corner
 
-export const LIP_FLOOR = LIP_Y - LIP_LOW_DY - LIP_LOW_R; // 1.745 — no garment may cross it
+export const LIP_FLOOR = LIP_Y - LIP_LOW_DY - LIP_LOW_R; // centre lip's lowest point
 export const LIP_CEIL = LIP_Y + LIP_CURL + LIP_END_R;    // 2.97 — highest, at the CORNERS
 
 // ---------------------------------------------------------------- face
-export const EYE_Y = 2.95;
-export const EYE_X = 0.25;
-export const EYE_Z = 0.72;
+export const EYE_Y = 2.85;
+export const EYE_X = 0.22;
+export const EYE_Z = 0.77;
 export const TUFT_Y = 3.32;     // tuft pivot (the crown) — sway rotates HERE
 export const TUFT_LEAN = -0.42; // rad about X: they lean BACK, not sideways
 
@@ -106,7 +109,7 @@ export function eggRadius(y) {
 
 // Rows are COSINE-SPACED, so they bunch at the foot hollow and the crown where
 // the curve turns hardest and thin out down the straight of the flank.
-export const PROFILE_ROWS = 26;
+export const PROFILE_ROWS = 48;
 export const BODY_PROFILE = Array.from({ length: PROFILE_ROWS }, (_, i) => {
   const t = i / (PROFILE_ROWS - 1);
   const y = BODY_BOTTOM + (CROWN_Y - BODY_BOTTOM) * (0.5 - 0.5 * Math.cos(Math.PI * t));
@@ -135,7 +138,7 @@ export function profileSlice(y0, y1) {
   return out;
 }
 
-export function lathe(profile, segments = 20) {
+export function lathe(profile, segments = 48) {
   return new THREE.LatheGeometry(
     profile.map(([r, y]) => new THREE.Vector2(Math.max(r, 1e-4), y)), segments);
 }

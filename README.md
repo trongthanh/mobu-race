@@ -11,6 +11,9 @@ pnpm install
 pnpm start          # serves on http://localhost:3000
 ```
 
+Inspect the reference-based character at http://localhost:3000/mobu-lab.html: turntable,
+smile slider, running and celebration poses, plus a seeded outfit preview.
+
 Open http://localhost:3000 in one tab per participant. Or, on the welcome card, choose **Play offline in this tab** to host and run a complete private race with no WebSocket connection. Tests:
 
 ```bash
@@ -109,7 +112,9 @@ public/js/surface.js   Shared wave sampler, tessellated lake, bounded wake/dust 
 public/js/duck.js      Buoyant duck rig and swim/celebration poses
 public/js/duck-costumes.js  Eight seeded, fitted duck costume themes
 public/js/rig.js       Mobu rig spec: canonical measurements, egg profile, materials
-public/js/mobu.js      Mobu mesh + pose engine, name sprites, visitor API re-export
+public/js/mobu.js      Smooth Mobu rig + expressive pose engine, name sprites, visitor API
+public/js/mobu-mouth.js Closed sculpted lips with a smile position/normal morph target
+public/mobu-lab.html   Model studio: turntable, smile, poses and outfit inspection
 public/js/visitors.js  Soft chibi spectators, seeded appearance, articulated cheering
 public/js/costumes.js  Mix-and-match wardrobe (pants/top/head/face) + randomizer
 public/js/confetti.js  Winner celebration confetti (canvas, dependency-free)

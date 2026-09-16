@@ -1,19 +1,17 @@
 // Mobu Race - character builders (Three.js r186 ESM)
-// The mobu rig is a faithful port of ref/MOBU.md: one lathed egg (no neck),
-// the two-sausage grin with round corner bulbs, ink eyes, three tufts leaning
-// BACK over the crown, capsule arms, stubby legs and the shell shorts.
+// Reference: ref/mobu.jpg. Smooth egg body, one sculpted/morphable mouth,
+// ink eyes, three soft crown tufts, capsule arms and signature tick shorts.
 // Everything is built in canonical units (3.75 tall, feet at y=0) under an
 // inner root that is scaled as ONE unit to fit the track's world scale.
 import * as THREE from '../vendor/three.module.js';
 import {
   MOBU_PALETTE, sharedMat, lathe, profileSlice, radiusAt,
-  BODY_BOTTOM, BODY_UP, BODY_DOWN, HIP_R, WAIST_Y, HEAD_Y, HEAD_R, CROWN_Y,
-  LIP_Y, LIP_R, LIP_THETA, LIP_UP_DY, LIP_UP_R, LIP_LOW_DY, LIP_LOW_R,
-  LIP_END_R, LIP_CURL, LIP_FUSE,
+  BODY_BOTTOM, WAIST_Y, CROWN_Y,
   EYE_Y, EYE_X, EYE_Z, TUFT_Y, TUFT_LEAN,
   LEG_LEN, LEG_X, LEG_R, SHOULDER_Y, SHOULDER_X, ARM_LEN, ARM_R, ARM_OUT_ROT,
 } from './rig.js';
 import { applyCostume } from './costumes.js';
+import { createMouthGeometry } from './mobu-mouth.js';
 
 // World-scale factor: the canonical rig is 3.75 tall, the track was built
 // around a ~1.8-unit mobu (lane width 1.1). Scale the whole rig, never parts.
@@ -29,125 +27,20 @@ function setShadow(obj) {
   });
 }
 
-// ---------------------------------------------------------------- the grin
-const LIP_COLS = 26; // sweep columns per tube, tip to tip
-const LIP_SEG = 14;  // samples round the tube's circumference
-const LIP_CAPS = 4;  // rings closing each hemispherical end
-
-/** How far along the smile we are: 0 at the centre, 1 at the corner, as the
- *  square of the corner's X — a parabola in the plane the camera sees. */
-function sway(u) {
-  const s = Math.sin(u * LIP_THETA) / Math.sin(LIP_THETA);
-  return s * s;
-}
-
-/** The centre line of one lip at sweep position u ∈ [-1,1], offset dy from the crease. */
-function lipCentre(u, dy, out) {
-  const th = u * LIP_THETA;
-  const s = sway(u);
-  return out.set(
-    LIP_R * Math.sin(th),
-    LIP_Y + LIP_CURL * s + dy * (1 - LIP_FUSE * s),
-    LIP_R * Math.cos(th),
-  );
-}
-
-/** One lip tube swept tip to tip, closed at both ends with a hemisphere.
- *  Both tubes run to the same LIP_END_R, so the two caps read as ONE round,
- *  thick bulb at each corner — two sausages joined, not two pipe ends. */
-function lipTube(dy, r0, pos, idx) {
-  const c = new THREE.Vector3(), t = new THREE.Vector3();
-  const ahead = new THREE.Vector3(), behind = new THREE.Vector3();
-  const capC = new THREE.Vector3(), p = new THREE.Vector3();
-  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
-  const rings = [];
-
-  const frameAt = (u) => {
-    lipCentre(u, dy, c);
-    lipCentre(Math.min(1, u + 0.01), dy, ahead);
-    lipCentre(Math.max(-1, u - 0.01), dy, behind);
-    t.copy(ahead).sub(behind).normalize();
-  };
-
-  // The first basis vector is the OUTWARD radial direction squared up against
-  // the tangent, so consecutive rings share an orientation and the tube cannot
-  // twist along the sweep (a free-floating frame shows as a spiral crease).
-  const ring = (centre, tan, r) => {
-    e1.set(centre.x, 0, centre.z).normalize();
-    e1.addScaledVector(tan, -e1.dot(tan)).normalize();
-    e2.crossVectors(tan, e1);
-    rings.push(pos.length / 3);
-    for (let j = 0; j < LIP_SEG; j++) {
-      const a = (j / LIP_SEG) * Math.PI * 2;
-      p.copy(centre).addScaledVector(e1, r * Math.cos(a)).addScaledVector(e2, r * Math.sin(a));
-      pos.push(p.x, p.y, p.z);
-    }
-  };
-
-  const radiusAtU = (u) => r0 + (LIP_END_R - r0) * sway(u);
-
-  // ---- the corner at -θ: apex first, then rings opening out to full radius
-  frameAt(-1);
-  const apexA = pos.length / 3;
-  p.copy(c).addScaledVector(t, -LIP_END_R);
-  pos.push(p.x, p.y, p.z);
-  for (let k = LIP_CAPS; k >= 1; k--) {
-    const al = (k / (LIP_CAPS + 1)) * (Math.PI / 2);
-    capC.copy(c).addScaledVector(t, -LIP_END_R * Math.sin(al));
-    ring(capC, t, LIP_END_R * Math.cos(al));
+// The separately testable head/body must shade as one continuous egg. Match
+// normals at their shared cut using the unsliced profile's tangent.
+function eggPiece(y0, y1) {
+  const geometry = lathe(profileSlice(y0, y1));
+  const pos = geometry.attributes.position, normal = geometry.attributes.normal;
+  const slope = (radiusAt(WAIST_Y + 0.01) - radiusAt(WAIST_Y - 0.01)) / 0.02;
+  const n = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    if (Math.abs(pos.getY(i) - WAIST_Y) > 1e-5) continue;
+    const r = Math.hypot(pos.getX(i), pos.getZ(i));
+    n.set(pos.getX(i) / r, -slope, pos.getZ(i) / r).normalize();
+    normal.setXYZ(i, n.x, n.y, n.z);
   }
-
-  // ---- the sweep (column 0 IS the -θ cap's base ring, at α=0)
-  for (let i = 0; i < LIP_COLS; i++) {
-    const u = -1 + (2 * i) / (LIP_COLS - 1);
-    frameAt(u);
-    ring(c, t, radiusAtU(u));
-  }
-
-  // ---- the corner at +θ
-  frameAt(1);
-  for (let k = 1; k <= LIP_CAPS; k++) {
-    const al = (k / (LIP_CAPS + 1)) * (Math.PI / 2);
-    capC.copy(c).addScaledVector(t, LIP_END_R * Math.sin(al));
-    ring(capC, t, LIP_END_R * Math.cos(al));
-  }
-  const apexB = pos.length / 3;
-  p.copy(c).addScaledVector(t, LIP_END_R);
-  pos.push(p.x, p.y, p.z);
-
-  // Stitch. Ring vertices run about (e1 → e2), rings advance along +t, and
-  // (e1, e2, t) is right-handed, so ∂angle × ∂t points OUT of the tube.
-  const before = idx.length;
-  for (let r = 0; r < rings.length - 1; r++) {
-    for (let j = 0; j < LIP_SEG; j++) {
-      const j2 = (j + 1) % LIP_SEG;
-      const a = rings[r] + j, b = rings[r] + j2;
-      const d = rings[r + 1] + j, e = rings[r + 1] + j2;
-      idx.push(a, b, d, b, e, d);
-    }
-  }
-  const last = rings[rings.length - 1];
-  for (let j = 0; j < LIP_SEG; j++) {
-    const j2 = (j + 1) % LIP_SEG;
-    idx.push(rings[0] + j2, rings[0] + j, apexA); // near apex fans backward…
-    idx.push(last + j, last + j2, apexB);         // …far apex forward
-  }
-  return idx.length - before;
-}
-
-/** The grin: upper lip, then lower, as one geometry with two material groups. */
-function sausageLips() {
-  const pos = [], idx = [];
-  const upper = lipTube(LIP_UP_DY, LIP_UP_R, pos, idx);
-  const lower = lipTube(-LIP_LOW_DY, LIP_LOW_R, pos, idx);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setIndex(idx);
-  geo.addGroup(0, upper, 0);        // material 0: `lips`
-  geo.addGroup(upper, lower, 1);    // material 1: `lipsShade`
-  geo.computeVertexNormals();
-  geo.computeBoundingSphere();
-  return geo;
+  return geometry;
 }
 
 // ---------------------------------------------------------------- the rig
@@ -161,15 +54,14 @@ export function createMobu(opts = {}) {
   group.add(root);
 
   const bodyMat = sharedMat(MOBU_PALETTE.bodyBase);
-  const lipsMat = sharedMat(MOBU_PALETTE.lips, { roughness: 0.55 });
-  const lipsShadeMat = sharedMat(MOBU_PALETTE.lipsShade, { roughness: 0.55 });
+  const lipsMat = sharedMat(0xffffff, { roughness: 0.4, vertexColors: true });
   const inkMat = sharedMat(MOBU_PALETTE.ink, { roughness: 0.6 });
 
   // --- body + head: ONE profile of revolution, lathed once and cut in two at
   // WAIST_Y. The two halves share a material and never move apart; they exist
   // as two meshes so each keeps an honest bounding box.
-  const body = new THREE.Mesh(lathe(profileSlice(BODY_BOTTOM, WAIST_Y)), bodyMat);
-  const head = new THREE.Mesh(lathe(profileSlice(WAIST_Y, CROWN_Y)), bodyMat);
+  const body = new THREE.Mesh(eggPiece(BODY_BOTTOM, WAIST_Y), bodyMat);
+  const head = new THREE.Mesh(eggPiece(WAIST_Y, CROWN_Y), bodyMat);
 
   const upper = new THREE.Group(); // bob / lean / tilt move this as one unit
   upper.add(body, head);
@@ -177,38 +69,45 @@ export function createMobu(opts = {}) {
   // --- the grin: a SIBLING of head, never its child (a child's bbox would
   // flow into the head's). Vertices sit at absolute rig heights, so the pose
   // engine only ever TRANSLATES this mesh — never scales it about the origin.
-  const lips = new THREE.Mesh(sausageLips(), [lipsMat, lipsShadeMat]);
+  const lips = new THREE.Mesh(createMouthGeometry(), lipsMat);
+  lips.name = 'sculpted-smile';
   upper.add(lips);
 
   // --- eyes: two ink dots riding the head's surface; the PAIR is positioned
   // at EYE_Y so any future squash flattens them in place, not toward y=0.
-  const eyeGeo = new THREE.SphereGeometry(1, 8, 6);
+  const eyeGeo = new THREE.SphereGeometry(1, 20, 12);
   const eyes = new THREE.Group();
+  const happyEyes = new THREE.Group();
   for (const sx of [-1, 1]) {
     const eye = new THREE.Mesh(eyeGeo, inkMat);
-    eye.scale.set(0.085, 0.1, 0.085);
-    eye.position.set(sx * EYE_X, 0, EYE_Z);
+    eye.scale.set(0.061, 0.067, 0.045);
+    eye.position.set(sx * EYE_X, 0, EYE_Z + 0.035);
     eyes.add(eye);
+    const arc = new THREE.CatmullRomCurve3(Array.from({ length: 9 }, (_, i) => {
+      const u = i / 4 - 1;
+      return new THREE.Vector3(sx * EYE_X + u * 0.075, 0.04 * (1 - u * u), EYE_Z + 0.055);
+    }));
+    happyEyes.add(new THREE.Mesh(new THREE.TubeGeometry(arc, 16, 0.019, 8, false), inkMat));
   }
   eyes.position.set(0, EYE_Y, 0);
-  upper.add(eyes);
+  happyEyes.position.copy(eyes.position);
+  happyEyes.visible = false;
+  upper.add(eyes, happyEyes);
 
   // --- tufts: three fat ink lozenges on the crown, LEANING BACK over it
   // (about X), the outer two splayed (about Z). The group pivots at the crown.
   const tufts = new THREE.Group();
   tufts.position.set(0, TUFT_Y, 0);
-  const tipGeo = new THREE.SphereGeometry(1, 8, 6);
+  const tipGeo = new THREE.SphereGeometry(1, 20, 14);
   for (const [x, z, height, splay] of [[-0.24, -0.04, 0.24, 0.3], [0, -0.1, 0.3, 0], [0.24, -0.04, 0.24, -0.3]]) {
     const tuft = new THREE.Group();
     tuft.position.set(x, 0, z);
     tuft.rotation.order = 'ZXY';
     tuft.rotation.set(TUFT_LEAN, 0, splay);
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, height, 6), inkMat);
-    stem.position.y = height / 2;
     const tip = new THREE.Mesh(tipGeo, inkMat);
-    tip.scale.set(0.15, 0.16, 0.15);
-    tip.position.y = height;
-    tuft.add(stem, tip);
+    tip.scale.set(0.115, height * 0.5 + 0.11, 0.12);
+    tip.position.y = height * 0.5;
+    tuft.add(tip);
     tufts.add(tuft);
   }
   upper.add(tufts);
@@ -218,18 +117,14 @@ export function createMobu(opts = {}) {
   // any future held props.
   const arms = [];
   const hands = [];
-  const armShaftGeo = new THREE.CylinderGeometry(ARM_R, ARM_R, ARM_LEN, 10);
-  const armCapGeo = new THREE.SphereGeometry(ARM_R, 10, 8);
+  const armGeo = new THREE.CapsuleGeometry(ARM_R, ARM_LEN, 8, 20);
   for (const sx of [-1, 1]) {
     const arm = new THREE.Group();
     arm.position.set(sx * SHOULDER_X, SHOULDER_Y, 0);
     arm.rotation.z = sx * ARM_OUT_ROT;
-    const shaft = new THREE.Mesh(armShaftGeo, bodyMat);
-    shaft.position.y = -ARM_LEN / 2;
-    const capTop = new THREE.Mesh(armCapGeo, bodyMat);
-    const capEnd = new THREE.Mesh(armCapGeo, bodyMat);
-    capEnd.position.y = -ARM_LEN;
-    arm.add(shaft, capTop, capEnd);
+    const capsule = new THREE.Mesh(armGeo, bodyMat);
+    capsule.position.y = -ARM_LEN / 2;
+    arm.add(capsule);
     const hand = new THREE.Group();
     hand.position.set(0, -ARM_LEN, 0);
     arm.add(hand);
@@ -244,17 +139,19 @@ export function createMobu(opts = {}) {
   // lift the feet off the ground. Body-coloured; only the (unmodelled) sole
   // is dark in the reference, and no camera sees it.
   const legs = [];
-  const legShaftGeo = new THREE.CylinderGeometry(LEG_R, LEG_R, LEG_LEN, 8);
+  // Rounded foot profile with a flat sole; no overlapping shaft/ball seam.
+  const footGeo = lathe([
+    [0, 0], [LEG_R * 0.72, 0], [LEG_R * 0.94, 0.055],
+    [LEG_R, 0.13], [LEG_R, LEG_LEN], [0, LEG_LEN],
+  ], 32);
+  footGeo.translate(0, -LEG_LEN, 0);
   for (const sx of [-1, 1]) {
     const leg = new THREE.Group();
     leg.position.set(sx * LEG_X, LEG_LEN, 0);
-    const shaft = new THREE.Mesh(legShaftGeo, bodyMat);
-    shaft.position.y = -LEG_LEN / 2;
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), bodyMat);
-    foot.scale.set(LEG_R, LEG_R * 0.78, LEG_R * 1.1);
-    // centred so the rounded bottom just REACHES y=0 and never goes below it
-    foot.position.set(0, -LEG_LEN + LEG_R * 0.78, 0.05);
-    leg.add(shaft, foot);
+    const foot = new THREE.Mesh(footGeo, bodyMat);
+    foot.scale.z = 1.1;
+    foot.position.z = 0.035;
+    leg.add(foot);
     root.add(leg);
     legs.push(leg);
   }
@@ -273,7 +170,7 @@ export function createMobu(opts = {}) {
   const rig = {
     root, upper, attach,
     parts: {
-      body, head, lips, eyes, tufts,
+      body, head, lips, eyes, happyEyes, tufts,
       armL: arms[0], armR: arms[1], handL: hands[0], handR: hands[1],
       legL: legs[0], legR: legs[1],
     },
@@ -292,9 +189,24 @@ export function createMobu(opts = {}) {
   // they play in the character's own facing frame.
   let heading = 0;
   let celebrating = false;
+  let smile = 0;
+
+  function setSmile(value) {
+    smile = Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 0;
+    lips.morphTargetInfluences[0] = smile;
+  }
 
   function animate(t, speed = 0, motion = {}) {
     const s = Math.min(1, Math.max(0, speed));
+    const cheering = celebrating && s <= 0.02;
+    const expression = cheering ? 0.9 + 0.1 * Math.sin(t * 7) ** 2 : smile;
+    lips.morphTargetInfluences[0] = expression;
+    // Squash about the eye pair's own pivot: never slide eyes down the face.
+    const blinkPhase = ((t % 4.6) + 4.6) % 4.6;
+    const blink = blinkPhase > 4.42 ? Math.sin((blinkPhase - 4.42) / 0.18 * Math.PI) : 0;
+    eyes.scale.y = (1 - 0.3 * expression) * (1 - 0.94 * blink);
+    eyes.visible = expression < 0.75;
+    happyEyes.visible = !eyes.visible;
     // Reset contact offsets so switching run/idle/celebration cannot leave a
     // foot behind. Distance drives phase: slowing down slows the actual gait.
     for (const leg of legs) { leg.position.y = LEG_LEN; leg.position.z = 0; }
@@ -370,7 +282,7 @@ export function createMobu(opts = {}) {
     }
   }
 
-  return { group, animate, setHeading: (h) => { heading = h; }, setCostume, setCelebrating: (on) => { celebrating = !!on; }, rig };
+  return { group, animate, setSmile, setHeading: (h) => { heading = h; }, setCostume, setCelebrating: (on) => { celebrating = !!on; }, rig };
 }
 
 /** Free a removed rig's GPU buffers. Materials cached in rig.js are shared
