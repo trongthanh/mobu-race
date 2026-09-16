@@ -3,7 +3,9 @@
 import assert from 'node:assert';
 import * as THREE from '../public/vendor/three.module.js';
 import { createMobu, disposeRig } from '../public/js/mobu.js';
-import { radiusAt, sharedMat, ARM_LEN, LIP_Y } from '../public/js/rig.js';
+import { separatorY } from '../public/js/mobu-mouth.js';
+import { boxingPoint } from '../public/js/mobu-shorts.js';
+import { radiusAt, sharedMat, ARM_LEN, LIP_Y, LIP_SCALE, LIP_UP_DY, LIP_UP_R, LIP_LOW_DY, LIP_LOW_R, LIP_END_R } from '../public/js/rig.js';
 import { WARDROBE, SLOT_KEYS, normalizeCostume, randomCostume, costumeFromSeed, applyCostume } from '../public/js/costumes.js';
 
 function boxOf(obj) {
@@ -42,7 +44,8 @@ function main() {
   const headW = headBox.max.x - headBox.min.x;
   const torsoW = bodyBox.max.x - bodyBox.min.x;
   assert.ok(lipW > headW, `lips wider than head (${lipW.toFixed(2)} vs ${headW.toFixed(2)})`);
-  assert.ok(lipW / headW >= 1.25, `lips/head width ratio >= 1.25 (got ${ (lipW / headW).toFixed(2) })`);
+  assert.ok(lipW / headW >= 1.25 && lipW / headW <= 1.34, `reference lips/head width ratio 1.25–1.34 (got ${(lipW / headW).toFixed(2)})`);
+  assert.ok(LIP_SCALE >= 0.9 && LIP_SCALE <= 0.95, 'whole-mouth reference scale remains a subtle reduction');
   assert.ok(lipBox.max.z > headBox.max.z, `grin protrudes past the head (${lipBox.max.z.toFixed(2)} vs ${headBox.max.z.toFixed(2)})`);
   assert.ok(torsoW > headW, `pear, not lollipop: torso ${torsoW.toFixed(2)} > head ${headW.toFixed(2)}`);
   console.log(`grin: width ${lipW.toFixed(2)} (${(lipW / headW).toFixed(2)}× head), tall ${(lipBox.max.y - lipBox.min.y).toFixed(2)}, protrudes z ${lipBox.max.z.toFixed(2)} — OK`);
@@ -77,9 +80,10 @@ function main() {
   assert.equal(seen.size, positions.count, 'lips form ONE joined surface');
   // At the front centre, two orange crests protrude beyond the shallow crease.
   let creaseZ = 0, crestZ = 0;
+  const scaledCreaseY = LIP_Y + (separatorY(0) - LIP_Y) * LIP_SCALE;
   for (let i = 0; i < positions.count; i++) {
     if (Math.abs(positions.getX(i)) > 0.025) continue;
-    const y = Math.abs(positions.getY(i) - LIP_Y), z = positions.getZ(i);
+    const y = Math.abs(positions.getY(i) - scaledCreaseY), z = positions.getZ(i);
     if (y < 0.01) creaseZ = Math.max(creaseZ, z);
     if (y > 0.06 && y < 0.25) crestZ = Math.max(crestZ, z);
   }
@@ -87,6 +91,15 @@ function main() {
   assert.ok(lips.material.isMeshStandardMaterial && !lips.material.flatShading, 'smooth vinyl mouth');
   assert.notStrictEqual(sharedMat(0xffffff), sharedMat(0xffffff, { vertexColors: true }), 'vertex colour option is cached separately');
   assert.notStrictEqual(sharedMat(0xffffff), sharedMat(0xffffff, { roughness: 0.9 }), 'roughness option is cached separately');
+
+  const upperHalf = LIP_UP_DY + LIP_UP_R;
+  const lowerHalf = LIP_LOW_DY + LIP_LOW_R;
+  assert.ok(Math.abs(upperHalf - lowerHalf) < 1e-9, 'outer envelope has equal upper/lower half-heights');
+  assert.ok(upperHalf + 0.012 <= LIP_END_R, 'centre stays slimmer than corner bulbs, including full smile');
+  const quarterRise = separatorY(0.5) - separatorY(0);
+  const endRise = separatorY(1) - separatorY(0);
+  assert.ok(Math.abs(quarterRise / endRise - 0.25) < 1e-9, 'separator follows the annotated quadratic curve');
+  assert.ok(endRise > 0.55 && endRise < 0.61, 'separator reaches the annotated cheek height');
 
   // Smile is a real shape target (including normals), not a translation/scale.
   const target = geometry.morphAttributes.position[0];
@@ -156,6 +169,14 @@ function main() {
   for (let y = 0.8; y <= 2.2; y += 0.05) minWidth = Math.min(minWidth, radiusAt(y));
   assert.ok(minWidth > 0.6, `no pinched neck between hips and head (min radius ${minWidth.toFixed(2)})`);
 
+  // Both leg lofts join at exactly the same crotch seam, but NOT at the hems.
+  for (let i = 0; i <= 16; i++) {
+    const a = Math.PI / 2 + Math.PI * i / 16;
+    const left = boxingPoint(-1, a, 0), right = boxingPoint(1, a, 0);
+    assert.ok(left.distanceTo(right) < 1e-6, 'boxing legs share a continuous crotch seam');
+  }
+  assert.ok(boxingPoint(1, Math.PI, 1).x - boxingPoint(-1, Math.PI, 1).x >= 0.039, 'boxing hems remain separated');
+
   // 9. every wardrobe item builds, stays near the egg's surface, keeps the
   // rig finite — mix every slot with every other slot at least once.
   let items = 0;
@@ -191,6 +212,14 @@ function main() {
             }
             const dist = Math.hypot(v.x, v.z);
             const ref = radiusAt(v.y);
+            if (o.userData.trouserLeg) {
+              // Inner trouser seams must come INSIDE the old egg silhouette;
+              // that is the deliberate split between two legs, not a box.
+              assert.ok(dist - ref <= 0.52, 'boxing legs keep a fitted outer silhouette');
+              assert.ok(Math.abs(v.x) < 1.12 && Math.abs(v.z) < 1.12, 'boxing legs stay inside hip envelope');
+              if (v.y < 0.50) assert.ok(v.x * o.userData.trouserLeg > 0.008, 'each hem stays on its own side: two separate openings');
+              continue;
+            }
             // ~0.36 of clearance is the spec's rule; the wide shorts hem
             // (which must clear the legs) is allowed a little more.
             assert.ok(
@@ -243,6 +272,15 @@ function main() {
   for (const slot of SLOT_KEYS) {
     assert.ok(WARDROBE[slot].some((w) => w.id === a[slot][0]), `seeded ${slot} id is a real item`);
   }
+
+  // Skirts remain possible but are rare in BOTH branches of the seeded picker.
+  let skirts = 0;
+  const samples = 5000;
+  for (let seed = 0; seed < samples; seed++) {
+    if (costumeFromSeed(seed).pants[0] === 'skirt') skirts++;
+  }
+  assert.ok(skirts / samples > 0.015 && skirts / samples < 0.065, `skirts stay rare, not absent (${skirts}/${samples})`);
+  console.log(`lower wear: ${((1 - skirts / samples) * 100).toFixed(1)}% pants/shorts, ${((skirts / samples) * 100).toFixed(1)}% skirts — OK`);
 
   // 11. cleanup works without throwing
   disposeRig(group);

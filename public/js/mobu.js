@@ -6,7 +6,7 @@
 import * as THREE from '../vendor/three.module.js';
 import {
   MOBU_PALETTE, sharedMat, lathe, profileSlice, radiusAt,
-  BODY_BOTTOM, WAIST_Y, CROWN_Y,
+  WAIST_Y, CROWN_Y,
   EYE_Y, EYE_X, EYE_Z, TUFT_Y, TUFT_LEAN,
   LEG_LEN, LEG_X, LEG_R, SHOULDER_Y, SHOULDER_X, ARM_LEN, ARM_R, ARM_OUT_ROT,
 } from './rig.js';
@@ -60,7 +60,9 @@ export function createMobu(opts = {}) {
   // --- body + head: ONE profile of revolution, lathed once and cut in two at
   // WAIST_Y. The two halves share a material and never move apart; they exist
   // as two meshes so each keeps an honest bounding box.
-  const body = new THREE.Mesh(eggPiece(BODY_BOTTOM, WAIST_Y), bodyMat);
+  // Lower wear is permanent. Omit the hidden hip skin so it cannot poke
+  // through the gap between true trouser legs (the old bucket hid that skin).
+  const body = new THREE.Mesh(eggPiece(1.14, WAIST_Y), bodyMat);
   const head = new THREE.Mesh(eggPiece(WAIST_Y, CROWN_Y), bodyMat);
 
   const upper = new THREE.Group(); // bob / lean / tilt move this as one unit

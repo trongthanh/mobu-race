@@ -70,7 +70,9 @@ fallback. The production build replaces it with the Worker endpoint.
   raincoat, chef, wizard, bee, lifeguard and royal, with coordinated hats, stripes,
   buttons and accessories. Mobus get nine coordinated looks (farmer, athlete, chef,
   royal, explorer, mushroom, varsity, winter stripes and party), plus occasional
-  mix-and-match outfits. New overalls, jerseys, striped tees and varsity/chef jackets
+  mix-and-match outfits. Lower wear is about 96% pants/shorts and 4% skirts;
+  signature and plain shorts have separate boxing-trunk legs and an elastic waistband.
+  New overalls, jerseys, striped tees and varsity/chef jackets
   follow the egg profile; sleeves move with the arms and necklines preserve the grin.
   Outfits are not controllable: every
   "Create race" reshuffles them, seeded by the server so all clients render the same
@@ -114,6 +116,7 @@ public/js/duck-costumes.js  Eight seeded, fitted duck costume themes
 public/js/rig.js       Mobu rig spec: canonical measurements, egg profile, materials
 public/js/mobu.js      Smooth Mobu rig + expressive pose engine, name sprites, visitor API
 public/js/mobu-mouth.js Closed sculpted lips with a smile position/normal morph target
+public/js/mobu-shorts.js Two-leg boxing trunks and fitted patch geometry
 public/mobu-lab.html   Model studio: turntable, smile, poses and outfit inspection
 public/js/visitors.js  Soft chibi spectators, seeded appearance, articulated cheering
 public/js/costumes.js  Mix-and-match wardrobe (pants/top/head/face) + randomizer

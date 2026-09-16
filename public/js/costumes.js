@@ -1,5 +1,5 @@
 // Mobu wardrobe — mix-and-match costumes built as SHELLS on the rig surface.
-// Rules carried over from ref/MOBU.md §9:
+// Rules carried over from ref/MOBU.md §8:
 //   - a garment is a shell on the body's own surface: at every angle θ and
 //     height y its radius is radiusAt(y) + gap, so it follows the egg;
 //   - nothing may cross LIP_FLOOR across the grin's angular span;
@@ -7,8 +7,9 @@
 // A costume spec is plain JSON, one [itemId, paletteIndex] pair per slot:
 //   { pants: ['classic', 0], top: ['none', 0], head: ['none', 0], face: ['none', 0] }
 import * as THREE from '../vendor/three.module.js';
+import { boxingLeg, boxingPatchPoint } from './mobu-shorts.js';
 import {
-  sharedMat, radiusAt, surfacePoint, tubeBetween,
+  sharedMat, lathe, radiusAt, surfacePoint, tubeBetween,
   HEAD_Y, HEAD_R, EYE_X, EYE_Y, LEG_X, MOBU_PALETTE,
   LIP_Y, LIP_THETA, LIP_CURL, LIP_LOW_DY, LIP_FUSE,
 } from './rig.js';
@@ -77,12 +78,6 @@ function shell({
   return mesh;
 }
 
-const FRONT = 0; // θ of the mobu's nose
-
-/** The classic shorts' hem, with a small crotch notch at the front centre. */
-const shortsHem = (yBot) => (th) =>
-  yBot + 0.12 * Math.max(0, Math.cos(th - FRONT)) ** 6;
-
 function drawstring(y) {
   const g = new THREE.Group();
   const ink = sharedMat(MOBU_PALETTE.ink, { roughness: 0.6 });
@@ -100,7 +95,7 @@ function drawstring(y) {
 
 /** A rounded white blob decal with a tick inside, stuck to the shell.
  *  Built in a local frame where +Z faces outward, then glued to the surface. */
-function blobDecal(theta, y, tickColor) {
+function blobDecal(theta, y, tickColor, legSide = 0) {
   const g = new THREE.Group();
   const blob = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), sharedMat(0xfffdf2, { roughness: 0.8 }));
   blob.scale.set(0.185, 0.205, 0.025);
@@ -123,10 +118,16 @@ function blobDecal(theta, y, tickColor) {
     const geometry = mesh.geometry.clone();
     geometry.applyMatrix4(mesh.matrix);
     const pos = geometry.attributes.position;
+    const point = new THREE.Vector3();
     for (let i = 0; i < pos.count; i++) {
+      if (legSide) {
+        boxingPatchPoint(legSide, theta, y, pos.getX(i), pos.getY(i), pos.getZ(i), point);
+        pos.setXYZ(i, point.x, point.y, point.z);
+        continue;
+      }
       const yy = y + pos.getY(i);
       const v = THREE.MathUtils.clamp((1.25 - yy) / (1.25 - 0.36), 0, 1);
-      const shellR = Math.max(0.97 - 0.04 * v, radiusAt(yy) + 0.05);
+      const shellR = y > 1.3 ? radiusAt(yy) + 0.105 : Math.max(0.97 - 0.04 * v, radiusAt(yy) + 0.05);
       const angle = theta + pos.getX(i) / shellR;
       const r = shellR + 0.009 + pos.getZ(i);
       pos.setXYZ(i, r * Math.sin(angle), yy, r * Math.cos(angle));
@@ -147,7 +148,7 @@ function mergeGarment(group) {
   group.updateMatrixWorld(true);
   const batches = new Map(), disposable = new Set();
   group.traverse((mesh) => {
-    if (!mesh.isMesh) return;
+    if (!mesh.isMesh || mesh.userData.trouserLeg) return;
     let batch = batches.get(mesh.material);
     if (!batch) { batch = { positions: [], normals: [], indices: [] }; batches.set(mesh.material, batch); }
     const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
@@ -162,7 +163,9 @@ function mergeGarment(group) {
     disposable.add(mesh.geometry);
   });
   for (const geometry of disposable) geometry.dispose();
+  const legs = group.children.filter(mesh => mesh.userData.trouserLeg);
   group.clear();
+  group.add(...legs);
   for (const [material, batch] of batches) {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(batch.positions, 3));
@@ -179,33 +182,37 @@ function mergeGarment(group) {
 function classicShorts(rig, color) {
   const g = new THREE.Group();
   const main = sharedMat(color);
-  g.add(shell({
-    yTop: 1.25, yBot: 0.36, hem: shortsHem(0.36),
-    gap: 0.05, minR: (v) => 0.97 - 0.04 * v, rows: 14, cols: 48, material: main,
-  }));
-  g.add(shell({
-    yTop: 1.27, yBot: 1.15, gap: 0.067,
-    rows: 2, cols: 48, material: main,
-  }));
-  g.add(drawstring(1.10));
-  for (let i = 0; i < 10; i++) {
-    const th = (i + 0.5) * Math.PI * 2 / 10;
-    g.add(blobDecal(th, i % 2 ? 0.87 : 0.64, color));
+  const cuff = sharedMat(shade(color, 0.86), { side: THREE.DoubleSide });
+  for (const side of [-1, 1]) {
+    g.add(boxingLeg(side, main), boxingLeg(side, cuff, true));
+    for (const [angle, y] of [[1.4, 0.72], [0.55, 0.92], [-1.4, 0.72], [-0.55, 0.92], [0, 0.59]]) {
+      g.add(blobDecal(angle, y, color, side));
+    }
   }
+  g.add(boxingWaistband(color));
+  g.add(drawstring(1.13));
   return mergeGarment(g);
+}
+
+function boxingWaistband(color) {
+  const profile = [
+    [radiusAt(1.12) + 0.057, 1.12], [radiusAt(1.14) + 0.078, 1.14],
+    [radiusAt(1.27) + 0.078, 1.27], [radiusAt(1.30) + 0.055, 1.30],
+    [radiusAt(1.30) + 0.036, 1.30], [radiusAt(1.12) + 0.036, 1.12],
+    [radiusAt(1.12) + 0.057, 1.12],
+  ];
+  const mesh = new THREE.Mesh(lathe(profile, 48), sharedMat(color));
+  mesh.castShadow = true;
+  return mesh;
 }
 
 function plainShorts(rig, color) {
   const g = new THREE.Group();
-  g.add(shell({
-    yTop: 1.25, yBot: 0.36, hem: shortsHem(0.36),
-    gap: 0.05, minR: (v) => 0.97 - 0.04 * v, rows: 10, cols: 26, material: sharedMat(color),
-  }));
-  g.add(shell({
-    yTop: 0.46, yBot: 0.36, hem: shortsHem(0.36),
-    gap: 0.055, minR: (v) => 0.97 - 0.04 * v, rows: 2, cols: 26, material: sharedMat(shade(color, 0.72)),
-  }));
-  g.add(drawstring(1.19));
+  for (const side of [-1, 1]) {
+    g.add(boxingLeg(side, sharedMat(color)));
+    g.add(boxingLeg(side, sharedMat(shade(color, 0.86), { side: THREE.DoubleSide }), true));
+  }
+  g.add(boxingWaistband(color), drawstring(1.13));
   return g;
 }
 
@@ -585,7 +592,7 @@ function blush(rig, color) {
 // ---------------------------------------------------------------- catalog
 export const WARDROBE = {
   pants: [
-    { id: 'classic', label: 'Classic shorts', build: classicShorts },
+    { id: 'classic', label: 'Boxing shorts', build: classicShorts },
     { id: 'plain', label: 'Plain shorts', build: plainShorts },
     { id: 'pants', label: 'Long pants', build: longPants },
     { id: 'skirt', label: 'Skirt', build: skirt },
@@ -648,23 +655,35 @@ export const COSTUME_LOOKS = [
   ['plain', 'overalls', 'brimmed', 'freckles'],
   ['classic', 'jersey', 'headband', 'none'],
   ['pants', 'chef', 'chef', 'blush'],
-  ['skirt', 'coat', 'crown', 'blush'],
+  ['pants', 'coat', 'crown', 'blush'],
   ['plain', 'shirt', 'brimmed', 'freckles'],
   ['skirt', 'striped', 'mushroom', 'blush'],
   ['classic', 'varsity', 'cap', 'none'],
   ['plain', 'striped', 'beanie', 'none'],
-  ['skirt', 'varsity', 'bow', 'glasses'],
+  ['plain', 'varsity', 'bow', 'glasses'],
 ];
-/** Coordinated silhouettes with palette variation; occasional mix-and-match
- * keeps the original wardrobe alive without mostly undressed racers. */
+// Keep the skirt look as an occasional accent, not a third of the cast.
+const LOOK_WEIGHTS = [1, 1, 1, 1, 1, 0.3, 1, 1, 1];
+const PANTS_PICKS = ['classic', 'classic', 'classic', 'classic', 'plain', 'plain', 'plain', 'plain', 'pants', 'pants', 'pants', 'skirt'];
+function weightedLook(rng) {
+  let pick = rng() * LOOK_WEIGHTS.reduce((sum, w) => sum + w, 0);
+  for (let i = 0; i < LOOK_WEIGHTS.length; i++) {
+    pick -= LOOK_WEIGHTS[i];
+    if (pick < 0) return COSTUME_LOOKS[i];
+  }
+  return COSTUME_LOOKS.at(-1);
+}
+
+/** Coordinated silhouettes with palette variation; lower wear is ~96% pants
+ * or shorts, with a rare skirt in both coordinated and mix-and-match looks. */
 export function randomCostume(rng = Math.random) {
-  const look = COSTUME_LOOKS[Math.floor(rng() * COSTUME_LOOKS.length)];
+  const look = weightedLook(rng);
   const primary = Math.floor(rng() * 9);
   const secondary = (primary + 4) % 9;
   const coordinated = rng() < 0.85;
   const colors = [secondary, primary, look[2] === 'brimmed' ? 7 : primary, 0];
   return Object.fromEntries(SLOT_KEYS.map((slot, i) => [slot, [
-    coordinated ? look[i] : WARDROBE[slot][Math.floor(rng() * WARDROBE[slot].length)].id,
+    coordinated ? look[i] : slot === 'pants' ? PANTS_PICKS[Math.floor(rng() * PANTS_PICKS.length)] : WARDROBE[slot][Math.floor(rng() * WARDROBE[slot].length)].id,
     colors[i],
   ]]));
 }

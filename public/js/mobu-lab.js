@@ -1,0 +1,61 @@
+import * as THREE from '../vendor/three.module.js';
+import { createMobu } from './mobu.js';
+import { costumeFromSeed } from './costumes.js';
+
+const viewport = document.querySelector('#viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1;
+viewport.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xfaf7ef);
+const camera = new THREE.PerspectiveCamera(25, 1, 0.1, 50);
+camera.position.set(0, 1.65, 7.4);
+camera.lookAt(0, 0.98, 0);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xffe5b3, 1.4));
+const key = new THREE.DirectionalLight(0xfff6e3, 2.8);
+key.position.set(-3, 6, 5);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -3, right: 3, top: 4, bottom: -3 });
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.025;
+key.shadow.radius = 4;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.65);
+fill.position.set(3, 2, -3);
+scene.add(fill);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.ShadowMaterial({ color: 0x8b7050, opacity: 0.14 }));
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = 0.048;
+floor.receiveShadow = true;
+scene.add(floor);
+const mobu = createMobu();
+scene.add(mobu.group);
+const pose = document.querySelector('#pose');
+const smile = document.querySelector('#smile');
+const yaw = document.querySelector('#yaw');
+smile.addEventListener('input', () => {
+  mobu.setSmile(Number(smile.value));
+  document.querySelector('#smile-value').value = `${Math.round(Number(smile.value) * 100)}%`;
+});
+document.querySelectorAll('[data-yaw]').forEach(button => button.addEventListener('click', () => { yaw.value = button.dataset.yaw; }));
+document.querySelector('#outfit').addEventListener('change', (event) => {
+  const id = event.target.value;
+  mobu.setCostume(id === 'seeded' ? costumeFromSeed(423) : { pants: [id, 0] });
+});
+new ResizeObserver(() => {
+  const { width, height } = viewport.getBoundingClientRect();
+  renderer.setSize(width, height);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+}).observe(viewport);
+renderer.setAnimationLoop((ms) => {
+  mobu.setHeading(Number(yaw.value) * Math.PI / 180);
+  mobu.setCelebrating(pose.value === 'celebrate');
+  mobu.animate(pose.value === 'rest' ? 0 : ms / 1000, pose.value === 'run' ? 1 : 0);
+  renderer.render(scene, camera);
+});
