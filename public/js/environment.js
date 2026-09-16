@@ -8,6 +8,7 @@
 // trees, bushes, farm animals, hay bales and a windmill.
 
 import * as THREE from '../vendor/three.module.js';
+import { waterAt, createLakeGeometry } from './surface.js';
 
 // ---------- deterministic PRNG ----------
 function mulberry32(seed) {
@@ -53,6 +54,7 @@ function mistTexture() {
 }
 
 export function createWorld(opts = {}) {
+  const isLake = opts.raceType === 'lake';
   const trackScale = opts.trackScale || 1;
   const a = 26 * trackScale;
   const b = 15 * trackScale;
@@ -185,6 +187,9 @@ export function createWorld(opts = {}) {
   const spinners = []; // windmill blade hubs
   const mists = [];    // drifting fog banks
   const clouds = [];   // lazy cloud puffs
+  const waterGlints = []; // subtle moving reflections on the derby pond
+  let waterSurface = null;
+  const floaters = [];
 
   // lighter grass patches on the apron
   const patchMat = stdMat(0x7ecb45);
@@ -269,22 +274,35 @@ export function createWorld(opts = {}) {
     return s;
   }
 
-  const dirtShape = ellipseShape(outerA, outerB);
+  // The lake derby inhabits the exact same valley: only this oval dirt lane
+  // turns into water, so every farm, hill, spectator stand and camera view
+  // remains familiar.
+  const courseShape = ellipseShape(outerA, outerB);
   const hole = new THREE.Path();
   for (let i = 0; i <= 96; i++) {
     const ang = (i / 96) * Math.PI * 2;
     const x = innerA * Math.sin(ang), y = innerB * Math.cos(ang);
     if (i === 0) hole.moveTo(x, y); else hole.lineTo(x, y);
   }
-  dirtShape.holes.push(hole);
-  const dirt = new THREE.Mesh(new THREE.ShapeGeometry(dirtShape, 48), stdMat(0xd9b380));
-  dirt.rotation.x = -Math.PI / 2;
-  dirt.position.y = 0.02;
-  dirt.receiveShadow = true;
-  group.add(dirt);
+  // The duck pond fills both the lane and its infield; the land course keeps
+  // the familiar grassy centre by punching the inner ellipse out.
+  if (!isLake) courseShape.holes.push(hole);
+  const course = new THREE.Mesh(
+    isLake ? createLakeGeometry(outerA, outerB) : new THREE.ShapeGeometry(courseShape, 48),
+    stdMat(isLake ? 0x439ea9 : 0xd9b380, isLake ? { roughness: 0.25, metalness: 0.22 } : {})
+  );
+  course.rotation.x = -Math.PI / 2;
+  course.position.y = 0.02;
+  course.receiveShadow = true;
+  group.add(course);
+  if (isLake) {
+    waterSurface = course;
+    const pos = course.geometry.attributes.position;
+    pos.setUsage(THREE.DynamicDrawUsage);
+    course.geometry.attributes.normal.setUsage(THREE.DynamicDrawUsage);
+  }
 
-  // darker tan edges (thin rings just outside/inside)
-  function edgeRing(rA, rB, width, y) {
+  function edgeRing(rA, rB, width, y, color = 0xb8925f) {
     const sh = ellipseShape(rA + width, rB + width);
     const h = new THREE.Path();
     for (let i = 0; i <= 96; i++) {
@@ -293,39 +311,180 @@ export function createWorld(opts = {}) {
       if (i === 0) h.moveTo(x, yy); else h.lineTo(x, yy);
     }
     sh.holes.push(h);
-    const m = new THREE.Mesh(new THREE.ShapeGeometry(sh, 48), stdMat(0xb8925f));
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(sh, 48), stdMat(color));
     m.rotation.x = -Math.PI / 2;
     m.position.y = y;
     m.receiveShadow = true;
     group.add(m);
   }
-  edgeRing(outerA, outerB, 0.7, 0.03);
-  edgeRing(innerA - 0.7, innerB - 0.7, 0.7, 0.03);
+  edgeRing(outerA, outerB, 0.7, 0.03, isLake ? 0xd8c79c : 0xb8925f);
+  if (!isLake) edgeRing(innerA - 0.7, innerB - 0.7, 0.7, 0.03, 0xb8925f);
+
+  // Instead of plastic buoys, the lake's lane rails are a procession of
+  // floating water-lily pads and lotus blooms — natural, visible, and fixed
+  // from track geometry so every client sees the same course.
+  if (isLake) {
+    // Moving light streaks give the large pond a live surface without a
+    // texture or shader dependency.
+    const glintMat = new THREE.MeshBasicMaterial({ color: 0xc9eef0, transparent: true, opacity: 0.2, depthWrite: false });
+    const glintGeo = new THREE.RingGeometry(0.24, 0.29, 12, 1, 0.3, Math.PI * 1.25);
+    for (let i = 0; i < 42; i++) {
+      const ang = i * 2.39996;
+      const r = Math.sqrt(((i * 37) % 41) / 42) * 0.86;
+      const glint = new THREE.Mesh(glintGeo, glintMat.clone());
+      glint.rotation.x = -Math.PI / 2;
+      glint.rotation.z = ang;
+      glint.scale.set(0.8 + (i % 4) * 0.28, 0.32 + (i % 3) * 0.12, 1);
+      glint.position.set(Math.sin(ang) * outerA * r, 0.043, Math.cos(ang) * outerB * r);
+      group.add(glint);
+      waterGlints.push({ mesh: glint, phase: i * 0.71 });
+    }
+    const padMat = stdMat(0x3f9148, { roughness: 0.7 });
+    const petalMat = stdMat(0xffb7c9, { roughness: 0.65 });
+    const centerMat = stdMat(0xf7ce45);
+    const padGeo = new THREE.CircleGeometry(0.26, 10, 0.25, Math.PI * 1.7);
+    const petalGeo = new THREE.SphereGeometry(0.105, 8, 6);
+    for (const lateral of [-4.72, 4.72]) {
+      for (let i = 0; i < 56; i++) {
+        const p = lanePoint(i / 56, lateral);
+        const pad = new THREE.Mesh(padGeo, padMat);
+        pad.rotation.x = -Math.PI / 2;
+        pad.rotation.z = i * 1.7;
+        pad.position.set(p.x, 0.061, p.z);
+        group.add(pad);
+        floaters.push({ mesh: pad, offset: 0.012 });
+        if (i % 2 === 0) {
+          const bloom = new THREE.Group();
+          for (let j = 0; j < 5; j++) {
+            const petal = new THREE.Mesh(petalGeo, petalMat);
+            const a = j * Math.PI * 2 / 5;
+            petal.scale.set(1.25, 0.45, 0.8);
+            petal.position.set(Math.sin(a) * 0.09, 0.095, Math.cos(a) * 0.09);
+            bloom.add(petal);
+          }
+          const core = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), centerMat);
+          core.scale.y = 0.45;
+          core.position.y = 0.12;
+          bloom.add(core);
+          bloom.position.set(p.x, 0.055, p.z);
+          group.add(bloom);
+          floaters.push({ mesh: bloom, offset: 0.005 });
+        }
+      }
+    }
+
+    // Decorative lily gardens live safely inside the racing loop. Their
+    // irregular clusters make the large pond feel inhabited rather than empty.
+    function lotusCluster(x, z, scale = 1, flower = true) {
+      const pad = new THREE.Mesh(padGeo, padMat);
+      pad.rotation.x = -Math.PI / 2;
+      pad.rotation.z = (x * 0.31 + z * 0.17) % (Math.PI * 2);
+      pad.scale.setScalar(scale);
+      pad.position.set(x, 0.068, z);
+      group.add(pad);
+      floaters.push({ mesh: pad, offset: 0.012 });
+      if (!flower) return;
+      const bloom = new THREE.Group();
+      for (let j = 0; j < 6; j++) {
+        const petal = new THREE.Mesh(petalGeo, petalMat);
+        const a = j * Math.PI / 3;
+        petal.scale.set(1.45 * scale, 0.45 * scale, 0.9 * scale);
+        petal.position.set(Math.sin(a) * 0.1 * scale, 0.105, Math.cos(a) * 0.1 * scale);
+        bloom.add(petal);
+      }
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.06 * scale, 8, 6), centerMat);
+      core.scale.y = 0.45;
+      core.position.y = 0.13;
+      bloom.add(core);
+      bloom.position.set(x, 0.06, z);
+      group.add(bloom);
+      floaters.push({ mesh: bloom, offset: 0.005 });
+    }
+    for (let i = 0; i < 34; i++) {
+      const angle = i * 2.39996 + 0.3;
+      const radius = 0.12 + ((i * 29) % 25) / 25 * 0.6;
+      lotusCluster(
+        Math.sin(angle) * innerA * radius,
+        Math.cos(angle) * innerB * radius,
+        0.72 + (i % 4) * 0.15,
+        i % 3 !== 1,
+      );
+    }
+
+    // Two small tied-up rowboats make the lake read as a real place, while
+    // staying in the non-racing infield well clear of the outer lane.
+    function rowboat(x, z, yaw, color) {
+      const boat = new THREE.Group();
+      const hull = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8), stdMat(color));
+      hull.scale.set(1.18, 0.19, 0.44);
+      hull.position.y = 0.15;
+      boat.add(hull);
+      const inner = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.07, 0.36), stdMat(0x5b3824));
+      inner.position.y = 0.25;
+      boat.add(inner);
+      const seatMat = stdMat(0xd8a05d);
+      for (const bx of [-0.28, 0.28]) {
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.055, 0.64), seatMat);
+        seat.position.set(bx, 0.3, 0);
+        boat.add(seat);
+      }
+      const oarMat = stdMat(0xc58a4b);
+      for (const side of [-1, 1]) {
+        const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.35, 6), oarMat);
+        oar.rotation.z = Math.PI / 2 + side * 0.22;
+        oar.position.set(0, 0.28, side * 0.5);
+        boat.add(oar);
+      }
+      boat.position.set(x, 0.03, z);
+      boat.rotation.y = yaw;
+      group.add(boat);
+      floaters.push({ mesh: boat, offset: -0.02 });
+    }
+    rowboat(-innerA * 0.34, innerB * 0.18, -0.42, 0xb95f3f);
+    rowboat(innerA * 0.26, -innerB * 0.27, 0.62, 0x4a87a6);
+  }
 
   // white start/finish stripe ACROSS all lanes at progress 0 (south side).
   // Travel at progress 0 runs along X, so the stripe is thin along X and spans
   // the lane band along Z.
   const stripeW = lanes * laneWidth + 0.8;
   const stripeZ = b + (lanes - 1) * laneWidth / 2; // center of lane band at progress 0
-  const stripe = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.8, stripeW),
-    stdMat(0xffffff, { roughness: 0.7 })
-  );
-  stripe.rotation.x = -Math.PI / 2;
-  stripe.position.set(0, 0.04, stripeZ);
-  stripe.receiveShadow = true;
-  group.add(stripe);
-
-  // checker squares: two columns along travel (X) x one row per lane (Z)
-  const sqMat1 = stdMat(0x333333);
-  const sqGeo = new THREE.PlaneGeometry(0.4, 0.4);
-  for (let i = 0; i < lanes; i++) {
-    for (let j = 0; j < 2; j++) {
-      if ((i + j) % 2 === 0) continue; // alternate over the white stripe
-      const sq = new THREE.Mesh(sqGeo, sqMat1);
-      sq.rotation.x = -Math.PI / 2;
-      sq.position.set((j - 0.5) * 0.4, 0.045, b + i * laneWidth);
-      group.add(sq);
+  if (isLake) {
+    // A shallow row of reeds marks the line without turning it into a dock.
+    const reedMat = stdMat(0x3f7837);
+    const flowerMat = stdMat(0xffb7c9);
+    for (let i = 0; i < 19; i++) {
+      const z = stripeZ - stripeW / 2 + i * stripeW / 18;
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.03, 0.42 + (i % 3) * 0.08, 5), reedMat);
+      stem.position.set(0, 0.16, z);
+      group.add(stem);
+      if (i % 3 === 0) {
+        const blossom = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), flowerMat);
+        blossom.scale.y = 0.35;
+        blossom.position.set(0, 0.38, z);
+        group.add(blossom);
+      }
+    }
+  } else {
+    const stripe = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.8, stripeW),
+      stdMat(0xffffff, { roughness: 0.7 })
+    );
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(0, 0.04, stripeZ);
+    stripe.receiveShadow = true;
+    group.add(stripe);
+    // checker squares: two columns along travel (X) x one row per lane (Z)
+    const sqMat1 = stdMat(0x333333);
+    const sqGeo = new THREE.PlaneGeometry(0.4, 0.4);
+    for (let i = 0; i < lanes; i++) {
+      for (let j = 0; j < 2; j++) {
+        if ((i + j) % 2 === 0) continue;
+        const sq = new THREE.Mesh(sqGeo, sqMat1);
+        sq.rotation.x = -Math.PI / 2;
+        sq.position.set((j - 0.5) * 0.4, 0.045, b + i * laneWidth);
+        group.add(sq);
+      }
     }
   }
 
@@ -818,11 +977,12 @@ export function createWorld(opts = {}) {
     group.add(m);
   }
 
-  // --- pond in the infield, with a sandy rim, lily pads and reeds ---
+  // The land course gets a small infield pond; the derby's whole infield is
+  // already water, so adding a second pond would leave an artificial island.
   const pondC = { x: -innerA * 0.42, z: innerB * 0.1 };
   const pondRx = Math.min(7, innerA * 0.3);
   const pondRz = pondRx * 0.62;
-  {
+  if (!isLake) {
     const rim = new THREE.Mesh(new THREE.CircleGeometry(1, 30), stdMat(0xd8c79c));
     rim.rotation.x = -Math.PI / 2;
     rim.scale.set(pondRx + 0.7, pondRz + 0.7, 1);
@@ -939,28 +1099,30 @@ export function createWorld(opts = {}) {
     const rr = outerA + 3 + rand() * a * 1.5;
     rock(Math.cos(ang) * rr * 1.35, Math.sin(ang) * rr * 0.75, 0.3 + rand() * 0.7);
   }
-  // a few rocks inside the infield (east side, clear of the pond)
-  for (let i = 0; i < 3; i++) {
-    const ang = rand() * 1.6 - 0.8;
-    rock(Math.cos(ang) * innerA * 0.4, Math.sin(ang) * innerB * 0.4, 0.35 + rand() * 0.4);
+  if (!isLake) {
+    // a few rocks and a tree only belong on the grassy land-course infield.
+    for (let i = 0; i < 3; i++) {
+      const ang = rand() * 1.6 - 0.8;
+      rock(Math.cos(ang) * innerA * 0.4, Math.sin(ang) * innerB * 0.4, 0.35 + rand() * 0.4);
+    }
+    const midTree = blobTree(1.3);
+    midTree.position.set(0, 0, 0);
+    group.add(midTree);
+    flowerPatch(2.5, 1.5);
+    flowerPatch(-2.5, -1.5);
   }
-  // infield tree
-  const midTree = blobTree(1.3);
-  midTree.position.set(0, 0, 0);
-  group.add(midTree);
-  flowerPatch(2.5, 1.5);
-  flowerPatch(-2.5, -1.5);
 
   // --- grandstand benches behind the start line ---
   for (let row = 0; row < 3; row++) {
     bench(0, outerZ + 1.5 + row * 2.4 + 1.35, Math.PI);
   }
 
-  // --- bunting: pennant lines from the banner poles out along the fence ---
-  {
+  // The derby already has natural lotus lane markers; keep the colourful
+  // racing bunting for the land course so it cannot be mistaken for buoys.
+  if (!isLake) {
     const poleTopY = 4;
-    const poleZN = stripeZ - halfW; // north-side banner pole
-    const poleZS = stripeZ + halfW; // south-side banner pole (grandstand side)
+    const poleZN = stripeZ - halfW;
+    const poleZS = stripeZ + halfW;
     for (const sx of [-1, 1]) {
       const ex = sx * a * 1.05, ez = b * 0.9;
       post(ex, ez);
@@ -1019,6 +1181,27 @@ export function createWorld(opts = {}) {
     for (const h of spinners) h.rotation.z = t * 0.85;
     for (const m of mists) m.sp.position.x = m.x + Math.sin(t * 0.02 + m.i * 1.7) * 4;
     for (const c of clouds) c.g.position.x = c.x + Math.sin(t * 0.008 + c.i * 2.1) * 7;
+    if (waterSurface) {
+      const pos = waterSurface.geometry.attributes.position;
+      const normals = waterSurface.geometry.attributes.normal;
+      for (let i = 0; i < pos.count; i++) {
+        const wave = waterAt(pos.getX(i), -pos.getY(i), t);
+        pos.setZ(i, wave.height - waterSurface.position.y);
+        const len = Math.hypot(wave.dx, wave.dz, 1);
+        normals.setXYZ(i, -wave.dx / len, wave.dz / len, 1 / len);
+      }
+      pos.needsUpdate = true;
+      normals.needsUpdate = true;
+    }
+    for (const f of floaters) {
+      f.mesh.position.y = waterAt(f.mesh.position.x, f.mesh.position.z, t).height + f.offset;
+    }
+    for (const g of waterGlints) {
+      const pulse = 0.14 + 0.1 * (0.5 + 0.5 * Math.sin(t * 1.25 + g.phase));
+      g.mesh.material.opacity = pulse;
+      g.mesh.rotation.z = g.phase + t * 0.025;
+      g.mesh.position.y = waterAt(g.mesh.position.x, g.mesh.position.z, t).height + 0.015;
+    }
   }
 
   const track = { a, b, laneWidth, lanes, length, outerZ };

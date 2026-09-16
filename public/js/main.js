@@ -1,6 +1,8 @@
 import * as THREE from '../vendor/three.module.js';
 import { createWorld } from './environment.js';
 import { createMobu, createWatcher, makeNameSprite, disposeRig, MOBU_SPRITE_Y } from './mobu.js';
+import { createDuck } from './duck.js';
+import { createSurfaceTrail } from './surface.js';
 import { costumeFromSeed, costumeSeedFromText } from './costumes.js';
 import { createConfetti } from './confetti.js';
 import { buildPlan, randomSlots } from './race-plan.js';
@@ -8,7 +10,7 @@ import { buildPlan, randomSlots } from './race-plan.js';
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
-  join: $('join'), nameInput: $('nameInput'), joinBtn: $('joinBtn'), offlineBtn: $('offlineBtn'),
+  join: $('join'), nameInput: $('nameInput'), raceTypeInput: $('raceTypeInput'), joinBtn: $('joinBtn'), offlineBtn: $('offlineBtn'),
   hud: $('hud'), roleBadge: $('roleBadge'),
   userList: $('userList'), userPanel: $('userPanel'),
   setupPanel: $('setupPanel'), namesInput: $('namesInput'), timeInput: $('timeInput'), createBtn: $('createBtn'),
@@ -41,12 +43,13 @@ document.body.prepend(renderer.domElement);
 function scaleForTime(timeSec) {
   return Math.min(2.6, Math.max(0.6, 0.55 + timeSec / 60));
 }
-let world = createWorld({ trackScale: scaleForTime(60) });
+let world = createWorld({ trackScale: scaleForTime(30), raceType: 'mobu' });
 let scene = world.scene;
 
-function rebuildWorld(timeSec) {
+function rebuildWorld(timeSec, raceType = state.setup.raceType) {
+  const oldScene = scene;
   scene = null;
-  const next = createWorld({ trackScale: scaleForTime(timeSec) });
+  const next = createWorld({ trackScale: scaleForTime(timeSec), raceType });
   world = next;
   scene = next.scene;
   // Racers/watchers were parented to the old scene — recreate them.
@@ -56,6 +59,8 @@ function rebuildWorld(timeSec) {
     state.watchers.delete(id);
   }
   renderWatchers();
+  disposeRig(oldScene);
+  oldScene.traverse((o) => { if (o.isLight && o.shadow) o.shadow.dispose(); });
 }
 
 // Near plane 0.5 keeps depth precision good across the foggy valley (the
@@ -75,7 +80,7 @@ const state = {
   offline: false,
   users: [],
   hostId: null,
-  setup: { names: [], timeSec: 60 },
+  setup: { names: [], timeSec: 30, raceType: 'mobu' },
   raceState: 'idle', // idle | ready | counting | racing | finished
   racers: [],        // {id,name,lane,slot, lateral, startFrac, mobu refs, progress, finished}
   plan: null,
@@ -90,6 +95,7 @@ const state = {
 let ws = null;
 let wsOpen = false;
 let helloName = null;
+let pendingRaceType = 'mobu';
 
 function websocketUrl() {
   const configured = window.MOBU_RACE_WS_URL;
@@ -98,12 +104,13 @@ function websocketUrl() {
   return `${proto}//${location.host}`;
 }
 
-function connect(name) {
+function connect(name, raceType) {
   if (name !== undefined) helloName = name;
+  if (raceType !== undefined) pendingRaceType = raceType;
   ws = new WebSocket(websocketUrl());
   ws.addEventListener('open', () => {
     wsOpen = true;
-    if (helloName !== null) send({ type: 'hello', name: helloName });
+    if (helloName !== null) send({ type: 'hello', name: helloName, raceType: pendingRaceType });
   });
   ws.addEventListener('message', (ev) => {
     let msg;
@@ -133,6 +140,7 @@ function handle(msg) {
       state.users = msg.users;
       state.raceState = msg.state === 'countdown' ? 'counting' : msg.state;
       state.setup = msg.setup;
+      rebuildWorld(state.setup.timeSec, state.setup.raceType);
       refreshSetupUI();
       refreshUserList();
       renderWatchers();
@@ -162,10 +170,15 @@ function handle(msg) {
       refreshSetupUI();
       renderWatchers();
       break;
-    case 'setup_updated':
+    case 'setup_updated': {
+      const raceTypeChanged = state.setup.raceType !== msg.setup.raceType;
       state.setup = msg.setup;
+      if (raceTypeChanged && state.raceState === 'idle' && !state.racers.length) {
+        rebuildWorld(state.setup.timeSec, state.setup.raceType);
+      }
       refreshSetupUI();
       break;
+    }
     case 'race_created':
       onRaceCreated(msg);
       break;
@@ -228,8 +241,9 @@ function offlineSetup(msg) {
     .filter((name) => typeof name === 'string' && name.trim())
     .map((name) => name.trim().slice(0, 20))
     .slice(0, 12);
-  const timeSec = TIME_STEPS.includes(Number(msg.timeSec)) ? Number(msg.timeSec) : 60;
-  return { names, timeSec };
+  const timeSec = TIME_STEPS.includes(Number(msg.timeSec)) ? Number(msg.timeSec) : 30;
+  const raceType = msg.raceType === 'lake' ? 'lake' : 'mobu';
+  return { names, timeSec, raceType };
 }
 
 function runOfflineCommand(msg) {
@@ -251,8 +265,8 @@ function runOfflineCommand(msg) {
         slot: slots[i],
         costumeSeed: Math.floor(Math.random() * 0x100000000),
       }));
-      offlineRace = { racers, timeSec: state.setup.timeSec, plan: null, winnerId: null };
-      handle({ type: 'race_created', timeSec: offlineRace.timeSec, racers });
+      offlineRace = { racers, timeSec: state.setup.timeSec, raceType: state.setup.raceType, plan: null, winnerId: null };
+      handle({ type: 'race_created', timeSec: offlineRace.timeSec, raceType: offlineRace.raceType, racers });
       return;
     }
     case 'start': {
@@ -283,6 +297,7 @@ function startOfflineRace() {
   handle({
     type: 'race_start',
     timeSec: offlineRace.timeSec,
+    raceType: offlineRace.raceType,
     racers: offlineRace.racers,
     plan,
     winnerId: offlineRace.winnerId,
@@ -329,7 +344,7 @@ function join() {
   saveVisitorName(name);
   el.join.classList.add('hidden');
   el.hud.classList.remove('hidden');
-  connect(name || undefined);
+  connect(name || undefined, el.raceTypeInput.value);
 }
 
 function playOffline() {
@@ -344,7 +359,7 @@ function playOffline() {
     isHost: true,
     users: [{ id: 'offline-host', name, isHost: true }],
     state: 'idle',
-    setup: { names: [], timeSec: 60 },
+    setup: { names: [], timeSec: 30, raceType: el.raceTypeInput.value },
   });
 }
 
@@ -371,15 +386,15 @@ const TIME_STEPS = [10, 20, 30, 60, 90, 120];
 function loadDraft() {
   try {
     const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
-    if (!raw || !Array.isArray(raw.names)) return { names: [], timeSec: 60 };
+    if (!raw || !Array.isArray(raw.names)) return { names: [], timeSec: 30 }; 
     const names = raw.names
       .filter((n) => typeof n === 'string' && n.trim())
       .map((n) => n.trim().slice(0, 20))
       .slice(0, 12);
-    const timeSec = TIME_STEPS.includes(Number(raw.timeSec)) ? Number(raw.timeSec) : 60;
+    const timeSec = TIME_STEPS.includes(Number(raw.timeSec)) ? Number(raw.timeSec) : 30;
     return { names, timeSec };
   } catch {
-    return { names: [], timeSec: 60 };
+    return { names: [], timeSec: 30 }; 
   }
 }
 
@@ -392,9 +407,9 @@ let draftSeeded = false;
 
 function sendSetupNow(names = null, timeSec = null) {
   const n = names ?? el.namesInput.value.split('\n').map((s) => s.trim()).filter(Boolean);
-  const t = timeSec ?? (Number(el.timeInput.value) || 60);
+  const t = timeSec ?? (Number(el.timeInput.value) || 30);
   saveDraft(n, t);
-  send({ type: 'setup', names: n, timeSec: t });
+  send({ type: 'setup', names: n, timeSec: t, raceType: state.setup.raceType });
 }
 
 let setupTimer = null;
@@ -414,7 +429,7 @@ camBtns.forEach((b) => b.addEventListener('click', () => setCamMode(b.dataset.ca
 
 function refreshSetupUI() {
   el.roleBadge.textContent = state.isHost
-    ? (state.offline ? '👑 Offline host · this tab only' : '👑 You are the Host')
+    ? (state.offline ? '👑 Offline host' : '👑 You are the Host')
     : `Watching: ${myName()}`;
   const phase = state.raceState; // idle | ready | counting | racing | finished
   const raceOn = phase === 'counting' || phase === 'racing' || phase === 'finished';
@@ -434,7 +449,7 @@ function refreshSetupUI() {
     !state.setup.names.length && draft.names.length
   ) {
     draftSeeded = true;
-    state.setup = { names: draft.names.slice(), timeSec: draft.timeSec };
+    state.setup = { names: draft.names.slice(), timeSec: draft.timeSec, raceType: state.setup.raceType };
     sendSetupNow(state.setup.names, state.setup.timeSec);
   }
   if (state.isHost && phase === 'idle' && document.activeElement !== el.namesInput) {
@@ -443,9 +458,10 @@ function refreshSetupUI() {
   }
   const n = state.setup.names.length;
   const plural = n === 1 ? '' : 's';
-  el.setupInfo.textContent = `${n} racer${plural} signed up · ${state.setup.timeSec}s race`;
-  el.readyInfo.textContent = `${n} racer${plural} on the line · ${state.setup.timeSec}s track`;
-  el.readyWaitingInfo.textContent = `${n} racer${plural} on the line — waiting for the host to start…`;
+  const course = state.setup.raceType === 'lake' ? '🦆 Lake Duck Derby' : '🏁 Countryside Mobu Dash';
+  el.setupInfo.textContent = `${n} racer${plural} signed up · ${state.setup.timeSec}s · ${course}`;
+  el.readyInfo.textContent = `${n} racer${plural} on the line · ${course}`;
+  el.readyWaitingInfo.textContent = `${n} racer${plural} on the line — ${course} is ready…`;
   el.createBtn.disabled = n < 2;
 }
 
@@ -541,33 +557,36 @@ function onRaceCreated(msg) {
 
 function buildRaceScene(msg) {
   clearRaceScene();
-  rebuildWorld(msg.timeSec);
+  const raceType = msg.raceType ?? state.setup.raceType;
+  state.setup.raceType = raceType;
+  rebuildWorld(msg.timeSec, raceType);
   camFocusInit = false; // re-aim the camera at the new pack without gliding
   state.timeSec = msg.timeSec;
   for (const r of msg.racers) {
-    const mobu = createMobu();
-    // Outfits are not controllable: the server rolls a fresh seed per racer
-    // at every create, and clients derive the identical outfit from it. The
-    // text-hash fallback keeps racers without a seed consistent too.
+    // Every racer gets one server seed. On land it chooses a mobu wardrobe;
+    // on the lake it picks a duck colour plus a tiny regatta costume.
     const seed = Number.isFinite(r.costumeSeed)
       ? r.costumeSeed >>> 0
       : costumeSeedFromText(r.id + '|' + r.name);
-    mobu.setCostume(costumeFromSeed(seed));
-    const { group, animate } = mobu;
+    const character = raceType === 'lake' ? createDuck({ seed }) : createMobu();
+    if (raceType !== 'lake') character.setCostume(costumeFromSeed(seed));
+    const { group, animate } = character;
     const sprite = makeNameSprite(r.name, { height: 0.45 });
-    sprite.position.y = MOBU_SPRITE_Y;
+    sprite.position.y = raceType === 'lake' ? 2.3 : MOBU_SPRITE_Y + 0.25;
     group.add(sprite);
     const lateral = Math.max(-3.3, Math.min(3.3, r.slot ? r.slot.lateral : 0));
     const startFrac = startFraction(r.slot ? r.slot.behind : 1);
     const pos = world.lanePoint(-startFrac, lateral);
     group.position.copy(pos);
-    mobu.setHeading(facingAt(-startFrac, lateral));
+    character.setHeading(facingAt(-startFrac, lateral));
     scene.add(group);
     state.racers.push({
-      ...r, group, animate, setHeading: mobu.setHeading,
-      setCelebrating: mobu.setCelebrating,
+      ...r, group, animate, setHeading: character.setHeading,
+      setCelebrating: character.setCelebrating,
       lateral, startFrac,
-      sepLat: lateral,
+      sepLat: lateral, lateralVelocity: 0,
+      phase: (seed >>> 0) / 4294967296 * Math.PI * 2,
+      trail: createSurfaceTrail(scene, raceType === 'lake', seed),
       coastMeters: 1, coastDur: 2.4, coastFrac: 0,
       progress: 0, finished: false, finishElapsed: null,
     });
@@ -633,6 +652,7 @@ function startRace(msg, elapsedOffset = 0) {
 function clearRaceScene() {
   for (const r of state.racers) {
     scene.remove(r.group);
+    r.trail.dispose();
     disposeRig(r.group);
   }
   state.racers = [];
@@ -861,19 +881,11 @@ function updateCamera(dt) {
     // view with the racers visible beyond.
     el = 0.42 + dragEl;
     dist = 11 * zoom;
-    let aheadP = 0.03;
-    if (leader) {
-      const racing = state.raceState === 'racing' || state.raceState === 'finished';
-      if (racing && leader.progress !== undefined) {
-        aheadP = Math.min(0.97, leader.progress + 0.03);
-      } else if (leader.startFrac !== undefined) {
-        // Ready state: racers are at -startFrac, place camera past the line.
-        aheadP = Math.max(0.01, -leader.startFrac + 0.03);
-      }
-    }
-    const aheadPos = world.lanePoint(aheadP, 0);
+    const progress = leader ? (leader.dispP ?? -leader.startFrac) : 0;
+    const aheadP = progress + Math.cos(el) * dist / world.track.length;
+    const aheadPos = world.lanePoint(aheadP, leader?.sepLat ?? 0);
     const height = Math.max(1.5, Math.sin(el) * dist);
-    camera.position.set(aheadPos.x, height, aheadPos.z);
+    camera.position.set(aheadPos.x + Math.sin(dragAz) * dist, height, aheadPos.z);
     camera.lookAt(t.x, 1.2, t.z);
     return;
   } else if (camMode === 'high') {
@@ -914,18 +926,20 @@ function tick(timestamp) {
   for (const w of state.watchers.values()) w.animate(now, cheering);
 
   // World life: windmill blades, drifting mist and clouds
-  if (world.animate) world.animate(now);
+  const racing = (state.raceState === 'racing' || state.raceState === 'finished') && state.plan;
+  const surfaceTime = racing ? (performance.now() - state.raceStartAt) / 1000 : now;
+  if (world.animate) world.animate(surfaceTime);
 
   // Racers
   if ((state.raceState === 'racing' || state.raceState === 'finished') && state.plan) {
-    const elapsed = (performance.now() - state.raceStartAt) / 1000;
+    const elapsed = surfaceTime;
     let leaderId = null, leaderP = -1;
     for (const r of state.racers) {
       const p = Math.min(progressAt(state.plan[r.id], elapsed), 1);
       r.progress = p;
       if (p >= 1 && !r.finished) {
         r.finished = true;
-        r.finishElapsed = elapsed;
+        r.finishElapsed = planFinishTime(r);
         // The winner's celebration waits for the gate inside animate(): they
         // coast to their spot first, then start hopping once stopped.
         if (r.id === state.winnerId) r.setCelebrating(true);
@@ -933,7 +947,13 @@ function tick(timestamp) {
       // Plan progress -> track progress: everyone starts behind the line and
       // stretches into the lap, so each racer crosses exactly on plan time.
       let dispP = -r.startFrac + p * (1 + r.startFrac);
-      let speed = 1;
+      // Derivative drives stroke/stride effort, not race position. The plan's
+      // exact linear interpolation and finish time remain untouched.
+      const kfs = state.plan[r.id];
+      const paceAt = (t) => (progressAt(kfs, t + 0.06) - progressAt(kfs, t - 0.06)) / 0.12
+        * (1 + r.startFrac) * world.track.length;
+      let pace = Math.max(0, paceAt(elapsed));
+      const acceleration = (paceAt(elapsed + 0.08) - paceAt(elapsed - 0.08)) / 0.16;
       if (r.finished) {
         // Quadratic ease-out over the park distance: speed starts AT the
         // racer's cross-line pace (coastDur was sized for that) and bleeds
@@ -941,13 +961,11 @@ function tick(timestamp) {
         // tracks the same ratio, so legs slow with the body.
         const k = Math.min(1, (elapsed - r.finishElapsed) / r.coastDur);
         dispP = 1 + r.coastFrac * (1 - (1 - k) * (1 - k));
-        speed = Math.max(0, 1 - k);
+        pace = 2 * r.coastMeters / r.coastDur * Math.max(0, 1 - k);
       }
       r.dispP = dispP;
-      const pos = world.lanePoint(dispP, r.sepLat);
-      r.group.position.set(pos.x, pos.y, pos.z);
-      r.setHeading(facingAt(dispP, r.sepLat));
-      r.animate(now, speed);
+      r.pace = pace;
+      r.motion = { distance: (dispP + r.startFrac) * world.track.length, acceleration, phase: r.phase };
       if (p < 1 && p > leaderP) { leaderP = p; leaderId = r.id; }
     }
     // Anti-overlap: nudge crowd-mates apart sideways, then let everyone
@@ -972,12 +990,22 @@ function tick(timestamp) {
     }
     for (let i = 0; i < n; i++) {
       const r = state.racers[i];
-      const relax = (r.lateral - r.sepLat) * (1 - Math.exp(-0.8 * dt));
-      r.sepLat = Math.max(-BAND_MAX, Math.min(BAND_MAX,
-        r.sepLat + relax + sepPushes[i] * Math.min(1, dt * 6)));
+      const step = Math.min(dt, 0.05);
+      const lake = state.setup.raceType === 'lake';
+      const desiredVelocity = THREE.MathUtils.clamp((r.lateral - r.sepLat) * 0.6 + sepPushes[i] * 4, -1.2, 1.2);
+      r.lateralVelocity += (desiredVelocity - r.lateralVelocity) * (1 - Math.exp(-(lake ? 3 : 7) * step));
+      r.sepLat = THREE.MathUtils.clamp(r.sepLat + r.lateralVelocity * step, -BAND_MAX, BAND_MAX);
       const pos = world.lanePoint(r.dispP, r.sepLat);
       r.group.position.set(pos.x, pos.y, pos.z);
-      r.setHeading(facingAt(r.dispP, r.sepLat));
+      const heading = facingAt(r.dispP, r.sepLat);
+      const ahead = facingAt(r.dispP + 0.002, r.sepLat);
+      const bend = Math.atan2(Math.sin(ahead - heading), Math.cos(ahead - heading)) / (world.track.length * 0.002);
+      r.motion.turn = THREE.MathUtils.clamp(bend * r.pace * r.pace / 9.81, -0.24, 0.24);
+      // Face the actual sidestep as well as the forward tangent.
+      r.setHeading(heading + Math.atan2(r.lateralVelocity, Math.max(1, r.pace)) * 0.65);
+      // Pose LAST: the old separation pass erased buoyancy and running bounce.
+      r.animate(surfaceTime, r.pace / 7, r.motion);
+      r.trail.update(surfaceTime, pos, heading, r.pace, r.motion.distance * 5 + r.phase);
     }
     // The moment the winner crosses the line, the camera (and the board) lock
     // onto them for good — no more lead swaps after the finish.

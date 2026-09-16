@@ -34,7 +34,12 @@
     <!-- Join screen -->
     <div id="join" class="overlay panel">
       <h1 id="logo">MOBU RACE <img class="logo-mascot" src="/mobu-race.png" alt="" aria-hidden="true" /></h1>
-      <p id="subtitle">A giant-lipped racing spectacle</p>
+      <p id="subtitle">Pick a course, then make some waves.</p>
+      <label for="raceTypeInput">Race type</label>
+      <select id="raceTypeInput">
+        <option value="mobu" selected>🏁 Countryside Mobu Dash</option>
+        <option value="lake">🦆 Lake Duck Derby</option>
+      </select>
       <label for="nameInput">Your screen name</label>
       <input id="nameInput" type="text" maxlength="20" placeholder="Your screen name" autocomplete="off" />
       <button id="joinBtn" class="btn-green">Join the racecourse</button>
@@ -66,8 +71,8 @@
           <select id="timeInput">
             <option value="10">10s — sprint loop</option>
             <option value="20">20s — short track</option>
-            <option value="30">30s — small track</option>
-            <option value="60" selected>60s — full track</option>
+            <option value="30" selected>30s — small track</option>
+            <option value="60">60s — full track</option>
             <option value="90">90s — long track</option>
             <option value="120">120s — marathon loop</option>
           </select>

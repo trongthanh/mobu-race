@@ -8,8 +8,9 @@ function sanitizeName(raw, fallback) {
 
 // Host can only pick from these race durations; the track ring scales with it.
 const TIME_STEPS = [10, 20, 30, 60, 90, 120];
+const RACE_TYPES = new Set(['mobu', 'lake']);
 
-function snapTimeStep(v, dflt = 60) {
+function snapTimeStep(v, dflt = 30) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return dflt;
   return TIME_STEPS.reduce((best, s) =>
@@ -25,8 +26,9 @@ function sanitizeSetup(payload) {
     if (s) names.push(s);
     if (names.length >= 12) break;
   }
-  const timeSec = snapTimeStep(payload?.timeSec, 60);
-  return { names, timeSec };
+  const timeSec = snapTimeStep(payload?.timeSec, 30);
+  const raceType = RACE_TYPES.has(payload?.raceType) ? payload.raceType : 'mobu';
+  return { names, timeSec, raceType };
 }
 
 // Linear interpolation of plan keyframes [[t, progress], ...] at time t.
@@ -227,7 +229,7 @@ export class RaceRoom {
     this.ctx = ctx;
     this.users = new Map();
     this.gameState = 'idle';
-    this.setup = { names: [], timeSec: 60 };
+    this.setup = { names: [], timeSec: 30, raceType: 'mobu' };
     this.race = null;
     this.nextIndex = 0;
   }
@@ -299,7 +301,7 @@ export class RaceRoom {
       leaderId: null,
       finished: false,
     });
-    this.broadcast({ type: 'race_start', timeSec, racers, plan, winnerId: this.race.winnerId });
+    this.broadcast({ type: 'race_start', timeSec, raceType: this.race.raceType, racers, plan, winnerId: this.race.winnerId });
 
     this.race.leaderTimer = setInterval(() => {
       if (this.gameState !== 'racing' || !this.race || this.race.finished) return;
@@ -351,7 +353,7 @@ export class RaceRoom {
     this.clearRaceTimers();
     this.race = null;
     this.gameState = 'idle';
-    this.broadcast({ type: 'reset', setup: { names: this.setup.names, timeSec: this.setup.timeSec } });
+    this.broadcast({ type: 'reset', setup: { names: this.setup.names, timeSec: this.setup.timeSec, raceType: this.setup.raceType } });
   }
 
   async fetch(request) {
@@ -380,14 +382,15 @@ export class RaceRoom {
       isHost: user.isHost,
       users: this.userList(),
       state: this.gameState,
-      setup: { names: this.setup.names, timeSec: this.setup.timeSec },
+      setup: { names: this.setup.names, timeSec: this.setup.timeSec, raceType: this.setup.raceType },
     };
     if (this.gameState === 'ready' && this.race) {
-      welcome.ready = { timeSec: this.race.timeSec, racers: this.race.racers };
+      welcome.ready = { timeSec: this.race.timeSec, raceType: this.race.raceType, racers: this.race.racers };
     } else if ((this.gameState === 'racing' || this.gameState === 'finished') && this.race) {
       const lastFinish = Math.max(...this.race.racers.map((racer) => this.race.plan[racer.id].at(-1)[0]));
       welcome.race = {
         timeSec: this.race.timeSec,
+        raceType: this.race.raceType,
         racers: this.race.racers,
         plan: this.race.plan,
         elapsed: this.gameState === 'finished' ? lastFinish + 5 : (Date.now() - this.race.startAt) / 1000,
@@ -425,6 +428,10 @@ export class RaceRoom {
         if (!user.joined) {
           user.joined = true;
           user.name = sanitizeName(msg.name, user.name);
+          if (user.isHost && this.gameState === 'idle' && RACE_TYPES.has(msg.raceType)) {
+            this.setup = { ...this.setup, raceType: msg.raceType };
+            this.broadcast({ type: 'setup_updated', setup: { names: this.setup.names, timeSec: this.setup.timeSec, raceType: this.setup.raceType } });
+          }
           this.broadcastUsers();
         }
         break;
@@ -435,7 +442,7 @@ export class RaceRoom {
       case 'setup':
         if (user.isHost && this.gameState === 'idle') {
           this.setup = sanitizeSetup(msg);
-          this.broadcast({ type: 'setup_updated', setup: { names: this.setup.names, timeSec: this.setup.timeSec } });
+          this.broadcast({ type: 'setup_updated', setup: { names: this.setup.names, timeSec: this.setup.timeSec, raceType: this.setup.raceType } });
         }
         break;
       case 'create':
@@ -449,9 +456,9 @@ export class RaceRoom {
             costumeSeed: Math.floor(Math.random() * 0x100000000),
           }));
           this.clearRaceTimers();
-          this.race = { timers: [], racers, timeSec: this.setup.timeSec };
+          this.race = { timers: [], racers, timeSec: this.setup.timeSec, raceType: this.setup.raceType };
           this.gameState = 'ready';
-          this.broadcast({ type: 'race_created', timeSec: this.race.timeSec, racers });
+          this.broadcast({ type: 'race_created', timeSec: this.race.timeSec, raceType: this.race.raceType, racers });
         }
         break;
       case 'start':

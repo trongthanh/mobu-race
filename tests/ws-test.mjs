@@ -75,7 +75,11 @@ async function main() {
   const A = await connect(port);
   const welcomeA = await waitFor(A, (m) => m.type === 'welcome', 'welcome A');
   assert.strictEqual(welcomeA.isHost, true, 'A should be host');
-  console.log('STEP 1a: A connected, isHost=true OK');
+  // The first host's welcome-screen course choice is accepted through hello.
+  send(A, { type: 'hello', name: 'Host', raceType: 'mobu' });
+  const welcomeCourse = await waitFor(A, (m) => m.type === 'setup_updated', 'welcome race type');
+  assert.strictEqual(welcomeCourse.setup.raceType, 'mobu');
+  console.log('STEP 1a: A connected, isHost=true, welcome race type accepted OK');
 
   const B = await connect(port);
   const welcomeB = await waitFor(B, (m) => m.type === 'welcome', 'welcome B');
@@ -98,11 +102,12 @@ async function main() {
   console.log('STEP 2: rename -> users broadcast with new name OK');
 
   // 3. A setup
-  send(A, { type: 'setup', names: ['Alpha', 'Beta', 'Gamma'], timeSec: 20 });
+  send(A, { type: 'setup', names: ['Alpha', 'Beta', 'Gamma'], timeSec: 20, raceType: 'lake' });
   for (const [ws, label] of [[A, 'A'], [B, 'B'], [C, 'C']]) {
     const s = await waitFor(ws, (m) => m.type === 'setup_updated', `setup_updated on ${label}`);
     assert.deepStrictEqual(s.setup.names, ['Alpha', 'Beta', 'Gamma']);
     assert.strictEqual(s.setup.timeSec, 20);
+    assert.strictEqual(s.setup.raceType, 'lake');
   }
   console.log('STEP 3: setup -> setup_updated broadcast OK');
 
@@ -116,6 +121,7 @@ async function main() {
   }
   const rc = creations[0];
   assert.strictEqual(rc.timeSec, 20);
+  assert.strictEqual(rc.raceType, 'lake');
   assert.strictEqual(rc.racers.length, 3);
   assert.deepStrictEqual(rc.racers.map((r) => r.lane).sort(), [0, 1, 2]);
   for (const r of rc.racers) {
@@ -147,6 +153,7 @@ async function main() {
   }
   const rs = starts[0];
   assert.strictEqual(rs.timeSec, 20);
+  assert.strictEqual(rs.raceType, 'lake');
   assert.strictEqual(rs.racers.length, 3);
   assert.deepStrictEqual(rs.racers.map((r) => r.lane).sort(), [0, 1, 2]);
   for (const r of rs.racers) assert.strictEqual(r.lane, Number(r.id.slice(1)), 'lane matches rN');

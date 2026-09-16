@@ -16,8 +16,9 @@ function sanitizeName(raw, fallback) {
 
 // Host can only pick from these race durations; the track ring scales with it.
 const TIME_STEPS = [10, 20, 30, 60, 90, 120];
+const RACE_TYPES = new Set(['mobu', 'lake']);
 
-function snapTimeStep(v, dflt = 60) {
+function snapTimeStep(v, dflt = 30) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return dflt;
   return TIME_STEPS.reduce((best, s) =>
@@ -33,8 +34,9 @@ function sanitizeSetup(payload) {
     if (s) names.push(s);
     if (names.length >= 12) break;
   }
-  const timeSec = snapTimeStep(payload?.timeSec, 60);
-  return { names, timeSec };
+  const timeSec = snapTimeStep(payload?.timeSec, 30);
+  const raceType = RACE_TYPES.has(payload?.raceType) ? payload.raceType : 'mobu';
+  return { names, timeSec, raceType };
 }
 
 // Linear interpolation of plan keyframes [[t, progress], ...] at time t.
@@ -235,7 +237,7 @@ export function createGameServer(httpServer) {
   // ---- game state ----
   const users = new Map(); // ws -> user {id, name, isHost, joinedAt, index}
   let state = 'idle'; // idle | ready | countdown | racing | finished
-  let setup = { names: [], timeSec: 60 };
+  let setup = { names: [], timeSec: 30, raceType: 'mobu' };
   let race = null; // {timers, racers+slots, timeSec, plan, winnerId, startAt, leaderId, leaderTimer, lastResults}
 
   const send = (ws, obj) => {
@@ -304,7 +306,7 @@ export function createGameServer(httpServer) {
     race.leaderId = null;
     race.finished = false;
 
-    broadcast({ type: 'race_start', timeSec, racers, plan, winnerId: race.winnerId });
+    broadcast({ type: 'race_start', timeSec, raceType: race.raceType, racers, plan, winnerId: race.winnerId });
 
     // leader tick every 500ms
     const leaderTimer = setInterval(() => {
@@ -365,7 +367,7 @@ export function createGameServer(httpServer) {
     if (race && race.leaderTimer) clearInterval(race.leaderTimer);
     race = null;
     state = 'idle';
-    broadcast({ type: 'reset', setup: { names: setup.names, timeSec: setup.timeSec } });
+    broadcast({ type: 'reset', setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType } });
   }
 
   // ---- connection handling ----
@@ -386,17 +388,18 @@ export function createGameServer(httpServer) {
       isHost: user.isHost,
       users: userList(),
       state,
-      setup: { names: setup.names, timeSec: setup.timeSec },
+      setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType },
     };
     // Late joiners catch up to whatever stage the race is at.
     if (state === 'ready' && race) {
-      welcome.ready = { timeSec: race.timeSec, racers: race.racers };
+      welcome.ready = { timeSec: race.timeSec, raceType: race.raceType, racers: race.racers };
     } else if ((state === 'racing' || state === 'finished') && race) {
       const elapsed = state === 'finished'
         ? Math.max(...race.racers.map((r) => race.plan[r.id][race.plan[r.id].length - 1][0])) + 5
         : (Date.now() - race.startAt) / 1000;
       welcome.race = {
         timeSec: race.timeSec,
+        raceType: race.raceType,
         racers: race.racers,
         plan: race.plan,
         elapsed,
@@ -427,6 +430,10 @@ export function createGameServer(httpServer) {
           if (!user.joined) {
             user.joined = true;
             user.name = sanitizeName(msg.name, user.name);
+            if (user.isHost && state === 'idle' && RACE_TYPES.has(msg.raceType)) {
+              setup = { ...setup, raceType: msg.raceType };
+              broadcast({ type: 'setup_updated', setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType } });
+            }
             broadcastUsers();
           }
           return;
@@ -437,7 +444,7 @@ export function createGameServer(httpServer) {
         case 'setup': {
           if (!user.isHost || state !== 'idle') return;
           setup = sanitizeSetup(msg);
-          broadcast({ type: 'setup_updated', setup: { names: setup.names, timeSec: setup.timeSec } });
+          broadcast({ type: 'setup_updated', setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType } });
           return;
         }
         case 'create': {
@@ -455,9 +462,9 @@ export function createGameServer(httpServer) {
             costumeSeed: Math.floor(Math.random() * 0x100000000),
           }));
           clearRaceTimers();
-          race = { timers: [], racers, timeSec: setup.timeSec };
+          race = { timers: [], racers, timeSec: setup.timeSec, raceType: setup.raceType };
           state = 'ready';
-          broadcast({ type: 'race_created', timeSec: race.timeSec, racers });
+          broadcast({ type: 'race_created', timeSec: race.timeSec, raceType: race.raceType, racers });
           return;
         }
         case 'start': {

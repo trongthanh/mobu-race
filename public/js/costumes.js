@@ -289,6 +289,57 @@ function coat(rig, color) {
   return g;
 }
 
+// Details are curved patches, cut from the same egg profile as the garment.
+function clothPatch(g, color, yTop, yBot, a0 = 0, a1 = Math.PI * 2, gap = 0.125) {
+  g.add(shell({ yTop, yBot, a0, a1, gap, rows: 3, cols: 32,
+    material: sharedMat(color, { side: THREE.DoubleSide }) }));
+}
+function stripedTop(rig, color) {
+  const g = tee(rig, color);
+  for (const y of [1.12, 1.40, 1.68]) clothPatch(g, 0xfff4e0, y + 0.10, y);
+  return g;
+}
+function overalls(rig, color) {
+  const g = tankTop(rig, 0xfff4e0);
+  clothPatch(g, color, 1.58, 1.0);
+  for (const th of [-0.38, 0.38, Math.PI - 0.38, Math.PI + 0.38]) {
+    clothPatch(g, color, 1.98, 1.48, th - 0.075, th + 0.075, 0.13);
+  }
+  clothPatch(g, shade(color, 0.77), 1.46, 1.20, -0.23, 0.23, 0.15);
+  for (const th of [-0.38, 0.38]) {
+    const button = new THREE.Mesh(new THREE.SphereGeometry(0.052, 8, 6), sharedMat(0xf9d976));
+    button.position.copy(surfacePoint(1.58, th, 0.18)); g.add(button);
+  }
+  return g;
+}
+function varsity(rig, color) {
+  const g = tee(rig, color);
+  // Cream sleeves contrast with the jacket, not a second coincident sleeve.
+  for (const arm of [rig.parts.armL, rig.parts.armR]) {
+    for (const child of arm.children) if (child.userData.garment === 'top') child.material = sharedMat(0xfff4e0, { side: THREE.DoubleSide });
+  }
+  clothPatch(g, 0xfff4e0, 1.12, 1.01);
+  clothPatch(g, 0xfff4e0, 1.86, 1.12, -0.045, 0.045);
+  g.add(blobDecal(0.48, 1.52, color));
+  return g;
+}
+function raceJersey(rig, color) {
+  const g = tankTop(rig, color);
+  for (const th of [-1.4, 1.4]) clothPatch(g, 0xfff4e0, 2.05, 1.0, th - 0.12, th + 0.12);
+  clothPatch(g, 0xfff4e0, 1.64, 1.22, -0.28, 0.28, 0.135);
+  clothPatch(g, INK, 1.56, 1.29, -0.045, 0.045, 0.15); // racing number 1
+  return g;
+}
+function chefJacket(rig, color) {
+  const g = shirt(rig, 0xfff4e0);
+  clothPatch(g, color, 1.13, 0.98);
+  for (const th of [-0.24, 0.24]) for (const y of [1.35, 1.62]) {
+    const button = new THREE.Mesh(new THREE.SphereGeometry(0.046, 8, 6), sharedMat(INK));
+    button.position.copy(surfacePoint(y, th, 0.16)); g.add(button);
+  }
+  return g;
+}
+
 // ---------------------------------------------------------------- head
 // Hats perch on the CROWN, clear of the eyes: the eye dots top out at
 // EYE_Y + 0.1, so every rim/band sits at ~3.1 and hugs the narrower skull
@@ -373,6 +424,51 @@ function headband(rig, color) {
   return g;
 }
 
+function brimmedHat(rig, color) {
+  const g = new THREE.Group();
+  g.add(domeAbove(EYE_CLEAR_Y + 0.05, HEAD_R + 0.07, color));
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.98, 1.02, 0.065, 24), sharedMat(color));
+  brim.position.y = EYE_CLEAR_Y + 0.05; g.add(brim);
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.05, 8, 24), sharedMat(shade(color, 0.65)));
+  band.rotation.x = Math.PI / 2; band.position.y = EYE_CLEAR_Y + 0.12; g.add(band);
+  return g;
+}
+function chefHat(rig, color) {
+  const g = new THREE.Group();
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.67, 0.76, 0.30, 24), sharedMat(0xfff4e0));
+  band.position.y = 3.28; g.add(band);
+  for (const x of [-0.36, 0, 0.36]) {
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.37, 16, 10), sharedMat(0xfff4e0));
+    puff.position.set(x, 3.55 + (x === 0 ? 0.09 : 0), 0); puff.scale.z = 1.5; g.add(puff);
+  }
+  return g;
+}
+function crown(rig, color) {
+  const g = new THREE.Group();
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.76, 0.20, 24, 1, true), sharedMat(0xf9d976, { side: THREE.DoubleSide }));
+  band.position.y = 3.22; g.add(band);
+  for (let i = 0; i < 7; i++) {
+    const th = i * Math.PI * 2 / 7;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.34, 4), sharedMat(0xf9d976));
+    tip.position.set(Math.sin(th) * 0.65, 3.49, Math.cos(th) * 0.65); g.add(tip);
+    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 6), sharedMat(color));
+    gem.position.set(Math.sin(th) * 0.76, 3.24, Math.cos(th) * 0.76); g.add(gem);
+  }
+  return g;
+}
+function mushroomHat(rig, color) {
+  const g = new THREE.Group();
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), sharedMat(color, { side: THREE.DoubleSide }));
+  cap.scale.set(1.07, 0.57, 1.07); cap.position.y = 3.16; g.add(cap);
+  for (let i = 0; i < 7; i++) {
+    const th = i * 2.4, r = i === 0 ? 0 : 0.68;
+    const patch = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), sharedMat(0xfff4e0));
+    patch.position.set(Math.sin(th) * r, 3.16 + 0.57 * Math.sqrt(1 - (r / 1.07) ** 2), Math.cos(th) * r);
+    patch.scale.y = 0.3; g.add(patch);
+  }
+  return g;
+}
+
 // ---------------------------------------------------------------- face
 /** Point on the head SPHERE (not the egg) at height y, angle θ, pushed out by off. */
 function headPoint(y, theta, off = 0) {
@@ -444,6 +540,11 @@ export const WARDROBE = {
     { id: 'tee', label: 'T-shirt', build: tee },
     { id: 'tank', label: 'Trunk top', build: tankTop },
     { id: 'coat', label: 'Long coat', build: coat },
+    { id: 'striped', label: 'Breton stripes', build: stripedTop },
+    { id: 'overalls', label: 'Pocket overalls', build: overalls },
+    { id: 'varsity', label: 'Varsity jacket', build: varsity },
+    { id: 'jersey', label: 'Racing jersey', build: raceJersey },
+    { id: 'chef', label: 'Chef jacket', build: chefJacket },
   ],
   head: [
     { id: 'none', label: 'Bare', build: null },
@@ -451,6 +552,10 @@ export const WARDROBE = {
     { id: 'beanie', label: 'Beanie', build: beanie, hidesTufts: true },
     { id: 'bow', label: 'Bow', build: bow },
     { id: 'headband', label: 'Headband', build: headband },
+    { id: 'brimmed', label: 'Adventure hat', build: brimmedHat, hidesTufts: true },
+    { id: 'chef', label: 'Chef toque', build: chefHat, hidesTufts: true },
+    { id: 'crown', label: 'Party crown', build: crown, hidesTufts: true },
+    { id: 'mushroom', label: 'Mushroom cap', build: mushroomHat, hidesTufts: true },
   ],
   face: [
     { id: 'none', label: 'Plain', build: null },
@@ -483,25 +588,29 @@ export function normalizeCostume(raw) {
   return out;
 }
 
-function pickWeighted(rng, weights) {
-  let sum = 0;
-  for (const w of weights) sum += w[1];
-  let roll = rng() * sum;
-  for (const [value, w] of weights) {
-    roll -= w;
-    if (roll <= 0) return value;
-  }
-  return weights[weights.length - 1][0];
-}
-
-/** A random outfit. Bare slots are common — most mobus wear just shorts. */
+export const COSTUME_LOOKS = [
+  ['plain', 'overalls', 'brimmed', 'freckles'],
+  ['classic', 'jersey', 'headband', 'none'],
+  ['pants', 'chef', 'chef', 'blush'],
+  ['skirt', 'coat', 'crown', 'blush'],
+  ['plain', 'shirt', 'brimmed', 'freckles'],
+  ['skirt', 'striped', 'mushroom', 'blush'],
+  ['classic', 'varsity', 'cap', 'none'],
+  ['plain', 'striped', 'beanie', 'none'],
+  ['skirt', 'varsity', 'bow', 'glasses'],
+];
+/** Coordinated silhouettes with palette variation; occasional mix-and-match
+ * keeps the original wardrobe alive without mostly undressed racers. */
 export function randomCostume(rng = Math.random) {
-  return {
-    pants: [pickWeighted(rng, [['classic', 5], ['plain', 2], ['pants', 2.2], ['skirt', 1.6]]), Math.floor(rng() * CLOTH_COLORS.length)],
-    top: [pickWeighted(rng, [['none', 3], ['shirt', 2], ['tee', 2.2], ['tank', 2], ['coat', 1.8]]), Math.floor(rng() * CLOTH_COLORS.length)],
-    head: [pickWeighted(rng, [['none', 4.6], ['cap', 1.9], ['beanie', 1.5], ['bow', 1], ['headband', 1]]), Math.floor(rng() * CLOTH_COLORS.length)],
-    face: [pickWeighted(rng, [['none', 5], ['glasses', 1.7], ['freckles', 1.2], ['blush', 1.2]]), 0],
-  };
+  const look = COSTUME_LOOKS[Math.floor(rng() * COSTUME_LOOKS.length)];
+  const primary = Math.floor(rng() * 9);
+  const secondary = (primary + 4) % 9;
+  const coordinated = rng() < 0.85;
+  const colors = [secondary, primary, look[2] === 'brimmed' ? 7 : primary, 0];
+  return Object.fromEntries(SLOT_KEYS.map((slot, i) => [slot, [
+    coordinated ? look[i] : WARDROBE[slot][Math.floor(rng() * WARDROBE[slot].length)].id,
+    colors[i],
+  ]]));
 }
 
 /** Deterministic PRNG (mulberry32) — the fallback when a racer arrives

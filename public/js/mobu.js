@@ -157,7 +157,7 @@ export function createMobu(opts = {}) {
 
   const root = new THREE.Group(); // canonical 3.75-tall rig, scaled as one unit
   root.scale.setScalar(MOBU_SCALE);
-  root.position.y = GROUND_Y;
+  root.position.y = 0; // outer group owns the ground offset (apply it only once)
   group.add(root);
 
   const bodyMat = sharedMat(MOBU_PALETTE.bodyBase);
@@ -293,8 +293,12 @@ export function createMobu(opts = {}) {
   let heading = 0;
   let celebrating = false;
 
-  function animate(t, speed = 0) {
+  function animate(t, speed = 0, motion = {}) {
     const s = Math.min(1, Math.max(0, speed));
+    // Reset contact offsets so switching run/idle/celebration cannot leave a
+    // foot behind. Distance drives phase: slowing down slows the actual gait.
+    for (const leg of legs) { leg.position.y = LEG_LEN; leg.position.z = 0; }
+    for (const arm of arms) arm.rotation.x = 0;
 
     if (celebrating && s <= 0.02) {
       // --- celebrate: victory hops in place, both arms punched overhead and
@@ -319,19 +323,27 @@ export function createMobu(opts = {}) {
       lips.position.y = Math.abs(Math.sin(f)) * 0.04;
       tufts.rotation.x = Math.sin(f + 0.9) * 0.12;
     } else if (s > 0.02) {
-      // --- run cycle: a bouncy waddle
-      const f = t * 9;
-      group.position.y = GROUND_Y + Math.abs(Math.sin(f)) * 0.12 * s; // hop
-      upper.position.y = 0;
-      upper.rotation.x = 0.14 * s; // forward lean
-      upper.rotation.z = Math.sin(f) * 0.08 * s; // roll
-      group.rotation.y = heading + Math.sin(f * 0.5) * 0.06 * s;
-
-      arms[0].rotation.z = -ARM_OUT_ROT + Math.sin(f) * 0.6 * s;
-      arms[1].rotation.z = ARM_OUT_ROT - Math.sin(f) * 0.6 * s;
-
-      legs[0].rotation.x = Math.sin(f) * 0.65 * s;
-      legs[1].rotation.x = -Math.sin(f) * 0.65 * s;
+      const f = (motion.distance ?? t * 1.8) * 5 + (motion.phase || 0);
+      group.position.y = GROUND_Y;
+      // Torso absorbs the landing while the stance foot stays on the dirt.
+      upper.position.y = 0.025 + (1 - Math.cos(f * 2)) * 0.035 * s;
+      upper.rotation.x = 0.08 * s + THREE.MathUtils.clamp((motion.acceleration || 0) * 0.008, -0.045, 0.07);
+      upper.rotation.z = Math.sin(f) * 0.035 * s - (motion.turn || 0);
+      group.rotation.y = heading;
+      arms[0].rotation.z = -ARM_OUT_ROT + Math.sin(f) * 0.22 * s;
+      arms[1].rotation.z = ARM_OUT_ROT - Math.sin(f) * 0.22 * s;
+      arms[0].rotation.x = -Math.sin(f) * 0.55 * s;
+      arms[1].rotation.x = Math.sin(f) * 0.55 * s;
+      for (let i = 0; i < legs.length; i++) {
+        const cycle = (((f / (Math.PI * 2) + i * 0.5) % 1) + 1) % 1;
+        const stance = 0.6;
+        const travel = (Math.PI * 2 / 5) * stance / MOBU_SCALE;
+        const recovery = Math.max(0, (cycle - stance) / (1 - stance));
+        const ease = recovery * recovery * (3 - 2 * recovery);
+        legs[i].position.z = cycle < stance ? travel * (0.5 - cycle / stance) : travel * (-0.5 + ease);
+        legs[i].position.y = LEG_LEN + Math.sin(recovery * Math.PI) * 0.24 * s;
+        legs[i].rotation.x = 0; // rotating a foot around the hip drove its sole below ground
+      }
 
       // jowls bounce; translate ONLY — the grin's vertices are at absolute
       // heights, so scaling it about the rig origin would slide it into his
@@ -377,173 +389,9 @@ export function disposeRig(rootObj) {
   });
 }
 
-// ---------------------------------------------------------------- watcher
-// Spectators styled after ref/cozy-3d-game-people.png: chunky little humans
-// with a big round head, a bowl of hair (or a hat) on top, a compact body,
-// stubby arms and legs, ink-dot eyes and a tiny smile. The whole look is
-// derived from a SEED — main.js hashes the visitor's id — so every client
-// renders the identical crowd (per-client Math.random() would desync it).
-const SKIN_TONES = [0xf6d7b0, 0xeab68b, 0xd69a66, 0xb87a4d, 0x8a5a3a];
-const HAIR_COLORS = [0x3f2a1d, 0x241d1a, 0x6b4a2f, 0xc99548, 0x8a3f2a, 0x9a9a9a, 0x2c4a73];
-const SHIRT_COLORS = [0xe4574c, 0xf5731f, 0xf9d976, 0x9bd45f, 0x5fc9c2, 0x8ab6f9, 0xb98cf7, 0xf4a8c0, 0xfff4e0, 0x495867];
-const PANTS_COLORS = [0x4a6fa5, 0x6a4a36, 0x495867, 0x8a7a5a, 0x3e5a44, 0x7a4a5a];
-const HAT_COLORS = [0xd9534f, 0x4a90d9, 0x6aab5a, 0xf9d976, 0x495867];
-
-function watcherRng(seed) {
-  let s = seed >>> 0;
-  return function () {
-    s |= 0; s = (s + 0x6D2B79F5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-export function createWatcher(opts = {}) {
-  const rng = watcherRng(opts.seed ?? Math.floor(Math.random() * 0xffffffff));
-  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
-  const skinMat = mat(pick(SKIN_TONES));
-  const shirtMat = mat(pick(SHIRT_COLORS));
-  const pantsMat = mat(pick(PANTS_COLORS));
-  const hairC = pick(HAIR_COLORS);
-  const look = rng();       // bowl hair / ponytail / hat
-  const skirt = rng() < 0.28;
-  const blush = rng() < 0.45;
-  const legsMat = skirt ? skinMat : pantsMat; // bare legs under a skirt
-
-  const group = new THREE.Group();
-
-  // legs + little shoes
-  const legGeo = new THREE.CylinderGeometry(0.062, 0.07, 0.42, 8);
-  const shoeGeo = new THREE.SphereGeometry(0.075, 8, 7);
-  const shoeMat = mat(0x4a3a2c);
-  for (const side of [-1, 1]) {
-    const leg = new THREE.Mesh(legGeo, legsMat);
-    leg.position.set(side * 0.095, 0.24, 0);
-    group.add(leg);
-    const shoe = new THREE.Mesh(shoeGeo, shoeMat);
-    shoe.scale.set(1, 0.6, 1.45);
-    shoe.position.set(side * 0.095, 0.05, 0.035);
-    group.add(shoe);
-  }
-
-  if (skirt) {
-    const sk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.27, 0.26, 12), shirtMat);
-    sk.position.y = 0.55;
-    group.add(sk);
-  }
-
-  // compact torso
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.185, 0.36, 6, 14), shirtMat);
-  torso.position.y = 0.82;
-  group.add(torso);
-
-  // arms: pivots at the shoulders so they can hang, sway — or wave
-  const arms = [];
-  const sleeveGeo = new THREE.CapsuleGeometry(0.055, 0.28, 4, 10);
-  const handGeo = new THREE.SphereGeometry(0.062, 8, 7);
-  for (const side of [-1, 1]) {
-    const arm = new THREE.Group();
-    arm.position.set(side * 0.235, 1.06, 0);
-    const sleeve = new THREE.Mesh(sleeveGeo, shirtMat);
-    sleeve.position.y = -0.18;
-    const hand = new THREE.Mesh(handGeo, skinMat);
-    hand.position.y = -0.36;
-    arm.add(sleeve, hand);
-    group.add(arm);
-    arms.push(arm);
-  }
-
-  // neck + big round head
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.09, 8), skinMat);
-  neck.position.y = 1.2;
-  group.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.205, 18, 14), skinMat);
-  head.position.y = 1.415;
-  group.add(head);
-
-  // hair (bowl cut, optionally with a ponytail) or a brimmed hat
-  if (look < 0.62) {
-    const hairMat = mat(hairC);
-    // a cap slightly larger than the head, tipped a touch over the brow
-    const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.225, 16, 12, 0, Math.PI * 2, 0, 1.95), hairMat);
-    bowl.position.set(0, 1.43, -0.01);
-    bowl.rotation.x = 0.14;
-    group.add(bowl);
-    const back = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 10), hairMat);
-    back.position.set(0, 1.36, -0.1);
-    back.scale.set(1, 0.95, 0.9);
-    group.add(back);
-    if (look < 0.2) {
-      const tie = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), hairMat);
-      tie.position.set(0, 1.34, -0.24);
-      group.add(tie);
-      const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.2, 4, 8), hairMat);
-      tail.position.set(0, 1.19, -0.27);
-      group.add(tail);
-    }
-  } else {
-    const hatMat = mat(pick(HAT_COLORS));
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.265, 0.275, 0.045, 16), hatMat);
-    brim.position.y = 1.53;
-    group.add(brim);
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), hatMat);
-    dome.position.y = 1.53;
-    dome.scale.set(1, 0.8, 1);
-    group.add(dome);
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.215, 0.05, 16), mat(0xfff4e0));
-    band.position.y = 1.5;
-    group.add(band);
-  }
-
-  // face: ink-dot eyes, tiny smile, optional blush
-  const faceMat = mat(0x333333, { roughness: 0.6 });
-  const eyeGeo = new THREE.SphereGeometry(0.022, 8, 6);
-  for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(eyeGeo, faceMat);
-    eye.position.set(side * 0.068, 1.445, 0.192);
-    group.add(eye);
-  }
-  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.009, 6, 12, Math.PI), faceMat);
-  smile.rotation.z = Math.PI;
-  smile.position.set(0, 1.385, 0.19);
-  group.add(smile);
-  if (blush) {
-    const blushMat = mat(0xf2a3a3, { roughness: 0.8 });
-    for (const side of [-1, 1]) {
-      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 6), blushMat);
-      dot.scale.set(1, 0.55, 0.35);
-      dot.position.set(side * 0.12, 1.395, 0.158);
-      group.add(dot);
-    }
-  }
-
-  setShadow(group);
-
-  // Heading lives on rotation.y (set via setHeading); animate only sways
-  // around it. YXZ keeps the sway/roll in the watcher's facing frame.
-  // `excite` (0..1) turns the idle sway into a cheer: arms punched up,
-  // waving out of phase, bouncing to a faster beat.
-  group.rotation.order = 'YXZ';
-  let heading = 0;
-  function animate(t, excite = 0) {
-    const e = Math.min(1, Math.max(0, excite));
-    group.position.y = Math.abs(Math.sin(t * (1.7 + e * 3.2))) * (0.025 + e * 0.055);
-    group.rotation.z = Math.sin(t * 1.1) * (0.04 + e * 0.02);
-    group.rotation.y = heading + Math.sin(t * 0.6) * (0.1 + e * 0.06);
-    const wave = Math.sin(t * (5.2 + e * 2.5));
-    arms[0].rotation.z = -(0.3 + e * 2.35) + wave * 0.3 * e;
-    arms[1].rotation.z = (0.3 + e * 2.35) + wave * 0.3 * e;
-  }
-
-  return { group, animate, setHeading: (h) => { heading = h; } };
-}
-
-function mat(color, extra = {}) {
-  return new THREE.MeshStandardMaterial(
-    Object.assign({ color, roughness: 0.9, metalness: 0.0 }, extra)
-  );
-}
+// Keep the public character-builder API stable; spectator meshes are separate
+// from the canonical mobu rig and its measurement invariants.
+export { createWatcher } from './visitors.js';
 
 // ---------------------------------------------------------------- name sprite
 export function makeNameSprite(text, opts = {}) {

@@ -17,6 +17,8 @@ Open http://localhost:3000 in one tab per participant. Or, on the welcome card, 
 pnpm test           # WebSocket protocol / race-logic integration test
 node tests/plan-check.mjs   # statistical check of pack pacing, drama, no stalls
 node tests/mobu-check.mjs   # headless mobu rig invariants (MOBU.md §10)
+node tests/surface-check.mjs # waves, buoyancy, duck wardrobe, foot contact, trail pools
+node tests/visitor-check.mjs # seeded visitor looks, planted feet, poses, mesh budget
 ```
 
 ## Cloudflare Pages deployment
@@ -52,17 +54,22 @@ fallback. The production build replaces it with the Worker endpoint.
 - **Host** — the first visitor to connect becomes the host (👑). They can hand the host role
   to any spectator ("Make host"); if the host leaves, the earliest-connected visitor is
   promoted automatically.
+- **Choose the spectacle** — on the welcome card, pick **Lake Duck Derby** or the original
+  **Countryside Mobu Dash** before joining. The host's choice is room-authoritative: late
+  joiners rebuild the same course and cast.
 - **Two-step setup** — step 1: the host types racer names (one per line) and picks the race
   duration (10/20/30/60/90/120s — the duration scales the track ring), then hits "Create
   race": the ring is rebuilt and the racers appear standing at random spots just behind the
   start line. Step 2: the host hits "Start race" for the 3-2-1 countdown, and they're off.
   A quick generator fills the field with numbered racers (001, 002, …) in one click, and
   the last setup draft is kept in localStorage and recovered the next time the host joins.
-- **Costumes** — every racer gets an outfit: pants, top, head and face mixed and matched.
-  Tops are randomly nothing, shirt, t-shirt, trunk top or long coat — all of them cover
-  the torso up over the shoulders, dipping below the grin at the front; shirts add a
-  collar and buttons, tees and coats add sleeves that swing with the arms (the coat is
-  open at the chest and flares down past the shorts). Outfits are not controllable: every
+- **Costumes** — ducks wear fitted, continuous garments in eight themes: sailor, pirate,
+  raincoat, chef, wizard, bee, lifeguard and royal, with coordinated hats, stripes,
+  buttons and accessories. Mobus get nine coordinated looks (farmer, athlete, chef,
+  royal, explorer, mushroom, varsity, winter stripes and party), plus occasional
+  mix-and-match outfits. New overalls, jerseys, striped tees and varsity/chef jackets
+  follow the egg profile; sleeves move with the arms and necklines preserve the grin.
+  Outfits are not controllable: every
   "Create race" reshuffles them, seeded by the server so all clients render the same
   wardrobe. The mobu mesh and wardrobe live in `public/js/rig.js` / `public/js/mobu.js` /
   `public/js/costumes.js` (spec: `ref/MOBU.md`).
@@ -70,11 +77,21 @@ fallback. The production build replaces it with the Worker endpoint.
   shared baseline so racers run close together, with staggered surge bumps for challengers
   so the lead changes hands mid-race without anyone stopping or "acting". Clients animate
   from the same server-authored plan, so everyone sees the same race.
+- **Surface motion** — a tessellated lake and duck buoyancy share the same analytic
+  waves and normals; ducks paddle alternating webbed feet, roll gently on the water,
+  lean into turns and leave expanding world-space wakes. On dirt, strides follow
+  distance travelled, stance feet stay grounded, torsos absorb landings and pooled
+  dust puffs fade behind the racers. Sidesteps are damped rather than snapping.
+  These are lightweight visual physics, not a fluid/rigid-body simulation: the
+  authoritative plan still controls positions and finish order exactly.
 - **Finish** — the camera locks onto the winner the moment they cross the line; a big
   congratulations banner with confetti takes over while the leaderboard shows the final
   standings. The winner screen stays up until the host clicks "Back to paddock".
-- **Spectators** — every visitor gets an avatar beside the start line with their screen
-  name overhead. Joining mid-race syncs you into the live race.
+- **Spectators** — every visitor gets a soft, chibi avatar beside the start line with
+  their screen name overhead. Six hairstyles and four outfits are seed-derived, with
+  skin-tone variety, optional glasses/freckles, expressive eyes and small blinks.
+  Articulated elbows and weight shifts make cheering lively without floating feet.
+  Joining mid-race syncs you into the live race.
 - **Cameras** — follow the current leader; switch between Chase / Front / High / Orbit
   (drag to orbit, wheel to zoom in Orbit mode).
 
@@ -88,8 +105,12 @@ server/index.js        Node + express + ws game server (host, race state machine
 public/js/main.js      Client integration: online/offline control, UI, cameras, race rendering
 public/js/race-plan.js Shared offline race-plan and start-grid generator
 public/js/environment.js  Procedural cozy world (oval track, trees, houses, lights)
+public/js/surface.js   Shared wave sampler, tessellated lake, bounded wake/dust pools
+public/js/duck.js      Buoyant duck rig and swim/celebration poses
+public/js/duck-costumes.js  Eight seeded, fitted duck costume themes
 public/js/rig.js       Mobu rig spec: canonical measurements, egg profile, materials
-public/js/mobu.js      Mobu mesh + pose engine, watcher avatars, name sprites
+public/js/mobu.js      Mobu mesh + pose engine, name sprites, visitor API re-export
+public/js/visitors.js  Soft chibi spectators, seeded appearance, articulated cheering
 public/js/costumes.js  Mix-and-match wardrobe (pants/top/head/face) + randomizer
 public/js/confetti.js  Winner celebration confetti (canvas, dependency-free)
 public/index.html      UI shell (join screen, host panel, HUD, celebration)
