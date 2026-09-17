@@ -65,7 +65,7 @@ export const ARM_OUT_ROT = 1.25; // rad from straight down: arms rest out, ~18°
 // The old tube-offset ratio is retained for garment neckline compatibility;
 // the actual closed, grooved surface now lives in mobu-mouth.js.
 export const LIP_Y = 2.21;       // the crease line's height at the centre
-export const LIP_SCALE = 0.93;   // whole sculpt, anchored at the face attachment
+export const LIP_SCALE = 0.91;   // whole sculpt, anchored at the face attachment
 export const LIP_R = HEAD_R * 1.1; // unscaled width reference for construction
 export const LIP_THETA = 1.15;   // ±66°: reference angular span
 export const LIP_UP_DY = 0.14;   // equal 0.38 half-heights around the crease

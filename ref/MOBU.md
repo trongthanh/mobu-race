@@ -71,7 +71,7 @@ old egg skin would show through the new shorts' real crotch/leg gap.
 ### Construction
 
 `createMouthGeometry()` builds one connected indexed surface, closed at both ends.
-The completed sculpt is uniformly scaled to **0.93** around its face-attachment
+The completed sculpt is uniformly scaled to **0.91** around its face-attachment
 anchor `(0, LIP_Y, 0.78)`. This matches the pre-rendered Mobu's proportions while
 preserving rear overlap with the head. Across the unscaled construction sweep,
 `u ∈ [−1, 1]`:
@@ -99,14 +99,14 @@ This slight optical lift compensates for the frontal projection so the lobes
 *look* equally substantial. Crucially, it does not deform the outer envelope:
 each elliptical cross-section is only reparameterised so a vertex row lands on
 the separator; the sides, back, and silhouette remain unchanged.
-- Construction front depth: **0.30** at the centre (**0.279** after scaling).
-- Sweep centre Y: **2.21**; construction crease Y: **2.245**, final **2.243**.
-- Separator's construction rise is **0.58** centre-to-cheek (**0.539** final)
+- Construction front depth: **0.30** at the centre (**0.273** after scaling).
+- Sweep centre Y: **2.21**; construction crease Y: **2.245**, final **2.242**.
+- Separator's construction rise is **0.58** centre-to-cheek (**0.528** final)
   before its groove fades.
 - `LIP_R = 1.10 × HEAD_R`, sweep reference `LIP_THETA = 1.15`; the final
-  visible width is about **1.29 ×** the rendered head after `LIP_SCALE = 0.93`.
+  visible width is about **1.26 ×** the rendered head after `LIP_SCALE = 0.91`.
 - Both section halves become a construction circle of radius **0.40** (final
-  radius **0.372**) at the cheeks. Fullness increases with `u²` rather than
+  radius **0.364**) at the cheeks. Fullness increases with `u²` rather than
   swelling in the middle.
 - Each end closes with a hemisphere tangent to that single circular section.
 
@@ -259,7 +259,7 @@ proportion or attachment errors.
    quads. The result is one component: **2,162 vertices / 4,320 triangles**.
 6. Build the neutral and delighted geometries through the same function. Store the
    delighted positions and normals as morph target `smile`, then dispose its shell.
-7. Uniformly shrink all resulting positions by 0.93 around `(0, 2.21, 0.78)`.
+7. Uniformly shrink all resulting positions by 0.91 around `(0, 2.21, 0.78)`.
    Do not scale the runtime lips mesh: its absolute-height vertices would move.
 
 ### Step 4 — Add face, tufts and limbs
@@ -310,7 +310,7 @@ smooth, attached and plausible.
 Run **`node tests/mobu-check.mjs`** after changing rig, mouth, animation or wardrobe.
 Checks include:
 
-- Mouth/head width ratio **1.25–1.34** (currently ~1.29), forward protrusion,
+- Mouth/head width ratio **1.25–1.34** (currently ~1.26), forward protrusion,
   and torso wider than head.
 - Lips are head's sibling; canonical height ~3.75 and feet grounded.
 - Every mouth edge has two oppositely wound incident faces; the whole mouth is one
