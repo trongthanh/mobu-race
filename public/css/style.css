@@ -184,11 +184,22 @@ label, .field-label {
   top: 12px;
   right: 12px;
   width: 230px;
-  max-height: 60vh;
-  overflow-y: auto;
+  /* Reserve the camera panel's measured height, plus the three 12px gaps. */
+  max-height: calc(100dvh - var(--camera-panel-height, 120px) - 36px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-#userList { list-style: none; }
+#userPanel > h3, #readyPanel, #readyWaiting, #waitingPanel { flex-shrink: 0; }
+
+#userList {
+  list-style: none;
+  min-height: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  flex-shrink: 1;
+}
 
 #userList li {
   display: flex;
@@ -210,7 +221,13 @@ label, .field-label {
   flex-shrink: 0;
 }
 
-#setupPanel { margin-top: 10px; border-top: 2px dashed #d9b98a; padding-top: 10px; }
+#setupPanel {
+  margin-top: 10px;
+  border-top: 2px dashed #d9b98a;
+  padding-top: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
 
 #createBtn { margin-top: 10px; }
 
@@ -319,7 +336,10 @@ label, .field-label {
   transform: translateX(-50%);
   font-size: 34px;
   color: #8a5a2b;
-  min-width: 130px;
+  /* Fit the longest countdown (120.00s) without resizing as digits change. */
+  width: 190px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   text-align: center;
   padding: 6px 20px;
 }
@@ -420,15 +440,13 @@ label, .field-label {
 
   #userPanel {
     width: 170px;
-    /* Keep the setup controls above the camera panel on short viewports. */
-    max-height: calc(100vh - 156px);
     font-size: 13px;
   }
 
   #topbar { max-width: 50vw; font-size: 13px; }
   #roleBadge { font-size: 13px; }
 
-  #timer { font-size: 24px; min-width: 100px; top: 8px; }
+  #timer { font-size: 24px; width: 150px; top: 8px; }
 
   #leaderboard {
     top: auto;

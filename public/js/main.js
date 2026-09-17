@@ -27,6 +27,13 @@ const el = {
 const camBtns = [...document.querySelectorAll('.cam-btn')];
 const confetti = createConfetti(el.confettiCanvas);
 
+// The camera controls can wrap or grow when fonts load. Reserve their actual
+// height on every viewport, not just narrow screens, so the sidebar never overlaps.
+new ResizeObserver(() => {
+  const height = el.camPanel.getBoundingClientRect().height;
+  if (height > 0) el.userPanel.style.setProperty('--camera-panel-height', `${height}px`);
+}).observe(el.camPanel);
+
 // ---------- Three.js setup ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -460,8 +467,8 @@ function refreshSetupUI() {
   const plural = n === 1 ? '' : 's';
   const course = state.setup.raceType === 'lake' ? '🦆 Lake Duck Derby' : '🏁 Countryside Mobu Dash';
   el.setupInfo.textContent = `${n} racer${plural} signed up · ${state.setup.timeSec}s · ${course}`;
-  el.readyInfo.textContent = `${n} racer${plural} on the line · ${course}`;
-  el.readyWaitingInfo.textContent = `${n} racer${plural} on the line — ${course} is ready…`;
+  el.readyInfo.textContent = `${n} racer${plural} on the line · ${state.setup.timeSec}s · ${course}`;
+  el.readyWaitingInfo.textContent = `${n} racer${plural} on the line · ${state.setup.timeSec}s — ${course} is ready…`;
   el.createBtn.disabled = n < 2;
 }
 
@@ -490,10 +497,13 @@ function refreshUserList() {
 
 // ---------- Watcher avatars ----------
 function renderWatchers() {
-  // Keep existing avatars, add new ones, remove gone ones.
-  const ids = new Set(state.users.map((u) => u.id));
+  // The welcome payload can precede hello's screen-name update. Rebuild an
+  // avatar when its identity changes so its label, crown, and name-seeded outfit
+  // stay current on every client; leave unchanged avatars alone.
+  const usersById = new Map(state.users.map((u) => [u.id, u]));
   for (const [id, w] of state.watchers) {
-    if (!ids.has(id)) {
+    const user = usersById.get(id);
+    if (!user || w.name !== user.name || w.isHost !== user.isHost) {
       scene.remove(w.group);
       disposeRig(w.group);
       state.watchers.delete(id);
@@ -508,7 +518,7 @@ function renderWatchers() {
     sprite.position.y = 2.0;
     w.group.add(sprite);
     scene.add(w.group);
-    state.watchers.set(u.id, { ...w, sprite });
+    state.watchers.set(u.id, { ...w, sprite, name: u.name, isHost: u.isHost });
   });
   // Re-seat everyone so indices stay packed.
   state.users.forEach((u, i) => {
@@ -552,6 +562,9 @@ function onRaceCreated(msg) {
   el.congrats.classList.add('hidden');
   confetti.stop();
   buildRaceScene(msg);
+  el.raceHud.classList.remove('hidden');
+  el.leaderboard.classList.add('hidden');
+  el.timer.textContent = `${state.timeSec.toFixed(2)}s`;
   refreshSetupUI();
 }
 
@@ -559,6 +572,7 @@ function buildRaceScene(msg) {
   clearRaceScene();
   const raceType = msg.raceType ?? state.setup.raceType;
   state.setup.raceType = raceType;
+  state.setup.timeSec = msg.timeSec;
   rebuildWorld(msg.timeSec, raceType);
   camFocusInit = false; // re-aim the camera at the new pack without gliding
   state.timeSec = msg.timeSec;
@@ -739,11 +753,15 @@ function updateLeaderboard(finalResults = null) {
       lbRows.set(r.id, li);
     }
     const finishT = r.finishTime ?? (r.finished ? planFinishTime(r) : null);
-    const time = finishT == null ? '' : ` — ${finishT.toFixed(2)}s`;
-    const marks =
-      (r.finished ? ' 🏁' : '') +
-      (r.id === state.leaderId && state.raceState === 'racing' ? ' 🏃' : '');
+    // Do not reveal the preselected winner until they actually cross the line.
+    // The winner finishes at duration; negative values are time behind them.
+    const won = r.finished && r.id === state.winnerId;
+    const time = finishT == null || won ? '' : ` −${Math.max(0, finishT - state.timeSec).toFixed(2)}s`;
+    const marks = won ? ' 🥇' :
+      (!r.finished && r.id === state.leaderId && state.raceState === 'racing' ? ' 🏃' : '');
     li.textContent = `${i + 1}. ${r.name}${time}${marks}`;
+    li.title = won ? 'Winner' : finishT == null ? '' :
+      `${Math.max(0, finishT - state.timeSec).toFixed(2)} seconds behind the winner`;
     el.lbList.appendChild(li);
   });
   for (const [id, li] of lbRows) {
@@ -781,7 +799,7 @@ function showCongrats(msg) {
   el.congratsName.textContent = winner ? `${winner.name} wins! 🏆` : '??? wins! 🏆';
   el.congrats.classList.remove('hidden');
   confetti.start();
-  el.timer.textContent = `${Number(state.timeSec).toFixed(2)}s`;
+  el.timer.textContent = '0.00s';
   el.countdown.classList.add('hidden');
   updateLeaderboard(msg.results && msg.results.length ? msg.results : null);
   refreshSetupUI();
@@ -1016,7 +1034,7 @@ function tick(timestamp) {
       updateLeaderboard();
     }
     if (state.raceState === 'racing') {
-      el.timer.textContent = `${Math.min(elapsed, state.timeSec).toFixed(2)}s`;
+      el.timer.textContent = `${Math.max(0, state.timeSec - elapsed).toFixed(2)}s`;
       // Steady 2x-per-second refresh so order-change slides (0.45s) get to play.
       if (elapsed >= lbNextRefresh) {
         lbNextRefresh = Math.max(lbNextRefresh + 0.5, elapsed);
@@ -1026,7 +1044,7 @@ function tick(timestamp) {
   } else {
     // Paddock / on the line: spawned racers idle in place behind the start line.
     for (const r of state.racers) r.animate(now, 0);
-    el.timer.textContent = '0.00';
+    el.timer.textContent = `${state.timeSec.toFixed(2)}s`;
   }
 
   updateCamera(dt);
