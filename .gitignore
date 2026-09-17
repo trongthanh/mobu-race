@@ -29,5 +29,8 @@ k8s.yaml
 
 # Local-only agent config
 __pycache__
+.mcp.json
+ref/cozy-3d-game-people.png
+*.user.js
 
 
