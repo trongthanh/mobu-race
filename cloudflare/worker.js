@@ -59,18 +59,21 @@ function smoothstep(x) {
 //
 //   progress_i(t) = t / finishT_i + offset_i(t / timeSec)
 //
-// - finishT: winner crosses exactly at timeSec; challengers trail by 0.2%..0.5%,
-//   the rest by 0.6%..2%, so finishers cross at full speed one after another.
-// - offset: a small smooth wobble (±0.5%) plus 1-2 scheduled "surge bumps" for
-//   up to 3 challengers, centered at staggered mid-race moments so the lead
-//   changes hands several times. Bumps are snapped onto keyframe samples so a
-//   surge is always fully visible.
+// - finishT: winner crosses exactly at timeSec; the closest rival trails by
+//   0.8%..1.2%, the rest by 1.2%..3%, so finishers cross at full speed one
+//   after another but every racer stays close enough to contend for the lead.
+// - offset: a small smooth wobble (±0.3%) plus 1-3 scheduled "surge bumps" for
+//   EVERY racer, centered at staggered moments so the lead swaps frequently
+//   and even the last-seeded runner can briefly lead. Bumps are snapped onto
+//   keyframe samples so a surge is always fully visible.
 // - Offsets fade in at the start (the pack leaves the line together) and are
 //   zero before the finish (the sprint settles the final order).
 export function buildPlan(names, timeSec) {
   const n = names.length;
   const winnerIdx = Math.floor(Math.random() * n);
 
+  // Shuffle all non-winner indices so gap tiers are assigned at random,
+  // not by order-of-appearance (which always puts the same names behind).
   const others = [];
   for (let i = 0; i < n; i++) if (i !== winnerIdx) others.push(i);
   for (let i = others.length - 1; i > 0; i--) {
@@ -78,13 +81,19 @@ export function buildPlan(names, timeSec) {
     [others[i], others[j]] = [others[j], others[i]];
   }
 
-  const challengerCount = Math.min(3, others.length);
+  // Tighter gaps so even the last racer can catch up with a surge.
+  // Tiers: first third (close challengers), second third (mid pack),
+  // last third (tail) — but all within ~3% of the winner so any surge
+  // that peaks at ~3.5% can briefly take the lead.
   const finishTimes = new Array(n).fill(0);
   finishTimes[winnerIdx] = timeSec;
   others.forEach((idx, k) => {
-    const gap = k < challengerCount
-      ? 0.012 + Math.random() * 0.013 // challengers: 1.2%..2.5% behind
-      : 0.025 + Math.random() * 0.035; // rest: 2.5%..6% behind
+    const frac = k / others.length; // 0..1 across the non-winner field
+    const gap = frac < 1 / 3
+      ? 0.008 + Math.random() * 0.005   // closest third: 0.8%..1.3%
+      : frac < 2 / 3
+      ? 0.013 + Math.random() * 0.007   // middle third: 1.3%..2.0%
+      : 0.020 + Math.random() * 0.010;  // tail third: 2.0%..3.0%
     finishTimes[idx] = timeSec * (1 + gap);
   });
 
@@ -92,27 +101,33 @@ export function buildPlan(names, timeSec) {
   // Dense enough that even the winner's final sprint stays visible.
   const K = Math.min(64, Math.max(12, Math.round(timeSec / 1.5)));
 
-  // Surge bumps: challenger k surges around its own staggered slot, so lead
-  // handoffs happen one at a time; some challengers get a second, later bump.
-  // All bumps end before the final stretch (f=0.86). Peaks always beat the
-  // worst-case baseline gap (2.5%·slot) plus wobble (1%), so every surge
-  // takes the lead; width keeps the bump edges from braking below ~0.5x pace.
+  // ---- Surge bumps for EVERY racer ----
+  // Each racer gets 1-2 bumps (tail racers always get 2 so they have a
+  // realistic chance to appear up front). Bumps are staggered in time so
+  // lead changes cascade rather than clump. Amplitude always exceeds the
+  // worst baseline gap (3%) plus wobble (0.3%), so every surge is visible.
   const mkBump = (center) => {
-    const width = Math.min(0.3, Math.max(0.28, (5 + Math.random() * 3) / timeSec));
-    const amp = 0.032 + Math.random() * 0.008;
+    const width = Math.min(0.30, Math.max(0.26, (5 + Math.random() * 3) / timeSec));
+    const amp = 0.035 + Math.random() * 0.010;
     return { center, width, amp };
   };
   const bumps = new Map(); // racerIdx -> [{center, width, amp}]
-  for (let k = 0; k < challengerCount; k++) {
+  // Assign bump slots spread across the race: each racer gets a primary
+  // slot and possibly a secondary. The winner gets a late bump too (to
+  // be on top before the dip-sprint).
+  for (let i = 0; i < n; i++) {
     const list = [];
-    const slot = 0.16 + (0.62 * (k + 0.5)) / challengerCount; // ~0.2 .. 0.72
+    // Primary slot: spread evenly across 0.12..0.78
+    const slot = 0.12 + (0.66 * (i + 0.5)) / n;
     const b1 = mkBump(slot);
     b1.center = Math.min(b1.center, 0.86 - b1.width / 2);
     list.push(b1);
-    if (k % 2 === 0 || challengerCount === 1) {
-      const b2 = mkBump(slot + 0.26 + Math.random() * 0.08);
-      // keep it only if it fits between bump 1 and the final sprint without
-      // overlapping it (stacked bumps would spike the pace)
+    // Secondary bump: tail racers (including some front-runners) get a
+    // second surge later in the race for extra drama. The winner also gets
+    // one so they're fighting back before the dip.
+    const needsSecond = i === winnerIdx || i >= n - Math.ceil(n / 3) || i % 2 === 0;
+    if (needsSecond) {
+      const b2 = mkBump(slot + 0.20 + Math.random() * 0.10);
       const minC = slot + (b1.width + b2.width) / 2 + 0.04 + 1 / K;
       const maxC = 0.86 - b2.width / 2;
       if (minC <= maxC) {
@@ -120,7 +135,7 @@ export function buildPlan(names, timeSec) {
         list.push(b2);
       }
     }
-    bumps.set(others[k], list);
+    bumps.set(i, list);
   }
 
   // Snap bump peaks onto sampled keyframes so a surge is never missed.
@@ -130,24 +145,25 @@ export function buildPlan(names, timeSec) {
     }
   }
 
-  // Final drama: the winner eases back into the pack over the last few
-  // seconds (never leading late), then sprints off the dip to retake the
-  // lead right before the line. Depth always exceeds the worst challenger
-  // gap (2.5%) plus faded wobble, so the winner is genuinely behind late;
-  // ramp widths cap the entry at ~0.65x pace and the exit at ~1.8x sprint.
-  const dipEps = Math.min(0.07, Math.max(0.01, 0.7 / timeSec)); // cruise to the line after the sprint
-  const dipTOut = Math.min(0.2, Math.max(2.2 / timeSec, 0.07)); // sprint ramp
-  const dipTIn = Math.min(0.3, Math.max(4.5 / timeSec, 0.155)); // settle-in ramp
+  // ---- Final drama ----
+  // The winner eases back into the pack over the last stretch (never leading
+  // late), then sprints off the dip to retake the lead right before the line.
+  // Depth exceeds the worst gap (3%) plus faded wobble, so the winner is
+  // genuinely behind late; ramp widths scale with race duration so short
+  // races still have room for the dip while long races get more drama.
+  const dipEps = Math.min(0.07, Math.max(0.01, 0.7 / timeSec));
+  const dipTOut = Math.min(0.25, Math.max(2.5 / timeSec, 0.07));
+  const dipTIn = Math.min(0.35, Math.max(5.0 / timeSec, 0.155));
   const dipEnd = 1 - dipEps;
   const dipStart = dipEnd - dipTOut - dipTIn;
-  const dipDepth = 0.03 + Math.random() * 0.006;
+  const dipDepth = 0.035 + Math.random() * 0.008;
 
   // Per-racer background wobble, fixed for the whole race.
   const wobble = new Map(); // racerIdx -> {amp, w, phase}
   for (let i = 0; i < n; i++) {
     wobble.set(i, {
-      amp: 0.002 + Math.random() * 0.003,
-      w: 0.8 + Math.random() * 0.8,
+      amp: 0.0015 + Math.random() * 0.0020,
+      w: 0.6 + Math.random() * 1.0,
       phase: Math.random() * Math.PI * 2,
     });
   }
@@ -162,10 +178,8 @@ export function buildPlan(names, timeSec) {
       }
     }
     if (i === winnerIdx && f > dipStart && f < dipEnd) {
-      // settle back, then sprint off the sharp exit ramp
       o -= dipDepth * smoothstep((f - dipStart) / dipTIn) * smoothstep((dipEnd - f) / dipTOut);
     }
-    // wobble faded in at the start and out before the finish
     const wb = wobble.get(i);
     const env = smoothstep(f / 0.08) * smoothstep((1 - f) / 0.1);
     o += wb.amp * Math.sin(2 * Math.PI * (wb.w * f + wb.phase)) * env;
