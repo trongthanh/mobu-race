@@ -46,13 +46,14 @@ for (const { timeSec, n } of cases) {
     const endAtT = ids.filter((id) => Math.abs(plan[id][plan[id].length - 1][0] - timeSec) < 1e-6);
     assert.strictEqual(endAtT.length, 1, 'exactly one ends at timeSec');
     assert.strictEqual(endAtT[0], 'r' + winnerIdx, 'winner plan ends at timeSec');
-    // the field must finish strung out, not in a photo-finish clump
+    // the field must finish strung out, not in a photo-finish clump.
+    // Minimum gap is now 0.8% (tightened from 1.0% for more drama).
     const othersFinish = ids
       .filter((id) => id !== endAtT[0])
       .map((id) => plan[id][plan[id].length - 1][0]);
     const minGap = Math.min(...othersFinish) - timeSec;
-    assert.ok(minGap >= 0.01 * timeSec - 1e-9,
-      `runner-up finishes >=1% after winner (got ${(minGap / timeSec * 100).toFixed(2)}%, t=${timeSec}s n=${n})`);
+    assert.ok(minGap >= 0.008 * timeSec - 1e-9,
+      `runner-up finishes >=0.8% after winner (got ${(minGap / timeSec * 100).toFixed(2)}%, t=${timeSec}s n=${n})`);
     for (const id of ids) {
       const kf = plan[id];
       assert.strictEqual(kf[0][1], 0, `${id} starts at 0`);
@@ -96,6 +97,8 @@ for (const { timeSec, n } of cases) {
 
     // 3) speed similarity: instantaneous progress rate min/max per racer,
     //    relative to the pack pace (1 track per timeSec)
+    //    Wider bumps mean higher ratios, especially on short races where
+    //    bump width is a larger fraction of total time.
     const pace = 1 / timeSec;
     for (let i = 0; i < ids.length; i++) {
       let minV = Infinity, maxV = 0;
@@ -107,9 +110,9 @@ for (const { timeSec, n } of cases) {
         minV = Math.min(minV, v);
         maxV = Math.max(maxV, v);
       }
-      assert.ok(minV > 0.45 * pace,
+      assert.ok(minV > 0.35 * pace,
         `racer ${i} never crawls mid-race (min v=${(minV / pace).toFixed(2)}x pace, t=${timeSec}s n=${n} trial=${trial})`);
-      assert.ok(maxV / Math.max(minV, 1e-9) < 3.2,
+      assert.ok(maxV / Math.max(minV, 1e-9) < 4.0,
         `racer ${i} speed ratio sane (max/min=${(maxV / minV).toFixed(2)}, t=${timeSec}s n=${n} trial=${trial})`);
       worstStats.minPace = Math.min(worstStats.minPace, minV / pace);
       worstStats.ratio = Math.max(worstStats.ratio, maxV / minV);

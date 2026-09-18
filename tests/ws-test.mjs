@@ -175,7 +175,7 @@ async function main() {
     const last = kf[kf.length - 1];
     assert.strictEqual(last[1], 1, `plan ${id} ends at progress 1`);
     if (last[0] === 20) finishAt20.push(id);
-    else assert.ok(last[0] > 20 && last[0] <= 25, `plan ${id} finishTime ${last[0]} in (20, 25]`);
+    else assert.ok(last[0] > 20 && last[0] <= 20.7, `plan ${id} finishTime ${last[0]} in (20, 20.7]`);
   }
   assert.strictEqual(finishAt20.length, 1, 'exactly one plan ends at t=20');
   const expectedWinner = finishAt20[0];
@@ -209,7 +209,10 @@ async function main() {
     for (const m of ws.messages) if (m.type === 'leader') leaderIds.add(m.racerId);
   }
   console.log(`STEP 5: race finished, leader changes seen: ${[...leaderIds].join(', ')}`);
+  // With every racer getting bumps, 20s races should swap leaders often.
   assert.ok(leaderIds.size >= 2, `drama: at least 2 distinct leaders, got ${leaderIds.size}`);
+  // For a 20s race with 3 racers all getting bumps, 3+ is common
+  // (relaxed; 2 is the minimum bar for drama).
 
   const f0 = finishes[0];
   assert.strictEqual(f0.winnerId, expectedWinner, 'winnerId matches plan ending at t=20');
