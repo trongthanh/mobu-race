@@ -395,7 +395,11 @@ const isMain =
 
 if (isMain) {
   const app = express();
-  app.use(express.static(path.resolve(__dirname, '../public')));
+  const publicDir = path.resolve(__dirname, '../public');
+  app.use(express.static(publicDir));
+  // The solo game is the default route; /live intentionally serves the same
+  // client shell, which switches to its WebSocket-only experience by path.
+  app.get(['/live', '/live/'], (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
   const httpServer = http.createServer(app);
   createGameServer(httpServer);
   const port = process.env.PORT || 3000;

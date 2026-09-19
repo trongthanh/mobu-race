@@ -14,7 +14,7 @@ pnpm start          # serves on http://localhost:3000
 Inspect the reference-based character at http://localhost:3000/mobu-lab.html: turntable,
 smile slider, running and celebration poses, plus a seeded outfit preview.
 
-Open http://localhost:3000 in one tab per participant. Or, on the welcome card, choose **Play offline in this tab** to host and run a complete private race with no WebSocket connection. Tests:
+Open http://localhost:3000 for a complete private race in the current tab. Open http://localhost:3000/live in one tab per participant for the real-time multiplayer race. Tests:
 
 ```bash
 pnpm test           # WebSocket protocol / race-logic integration test
@@ -53,7 +53,8 @@ fallback. The production build replaces it with the Worker endpoint.
 
 ## How it works
 
-- **Offline mode** — the welcome card can start a private, standalone race in the current tab. The browser generates the same paced race plan, countdown, grid, costumes, results and celebration locally; it never opens a WebSocket or admits spectators.
+- **Private race** — `/` starts a standalone race in the current tab. The browser generates the same paced race plan, countdown, grid, costumes, results and celebration locally; it never opens a WebSocket or admits spectators. Its welcome screen simply lets you choose a race and start.
+- **Live race** — `/live` is the WebSocket-only multiplayer room. Its welcome screen lets visitors choose a race type and screen name; it includes a link back to the private game.
 - **Host** — the first visitor to connect becomes the host (👑). They can hand the host role
   to any spectator ("Make host"); if the host leaves, the earliest-connected visitor is
   promoted automatically.
@@ -107,7 +108,7 @@ Fonts), falling back to the system sans-serif stack.
 
 ```
 server/index.js        Node + express + ws game server (host, race state machine, plans)
-public/js/main.js      Client integration: online/offline control, UI, cameras, race rendering
+public/js/main.js      Route-aware private/live client control, UI, cameras, race rendering
 public/js/race-plan.js Shared offline race-plan and start-grid generator
 public/js/environment.js  Procedural cozy world (oval track, trees, houses, lights)
 public/js/surface.js   Shared wave sampler, tessellated lake, bounded wake/dust pools

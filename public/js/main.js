@@ -9,8 +9,11 @@ import { buildPlan, randomSlots } from './race-plan.js';
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
+const isLiveRace = location.pathname === '/live' || location.pathname === '/live/';
+document.body.classList.toggle('live-race', isLiveRace);
+const raceTypeInputs = [...document.querySelectorAll('input[name="raceType"]')];
 const el = {
-  join: $('join'), nameInput: $('nameInput'), raceTypeInput: $('raceTypeInput'), joinBtn: $('joinBtn'), offlineBtn: $('offlineBtn'),
+  join: $('join'), nameInput: $('nameInput'), joinBtn: $('joinBtn'),
   hud: $('hud'), topbar: $('topbar'), roleBadge: $('roleBadge'),
   userList: $('userList'), spectatorsPanel: $('spectatorsPanel'), userPanel: $('userPanel'), raceControlTitle: $('raceControlTitle'),
   setupPanel: $('setupPanel'), namesInput: $('namesInput'), syncVisitorsControl: $('syncVisitorsControl'), syncVisitors: $('syncVisitors'), syncedNames: $('syncedNames'), syncedNameList: $('syncedNameList'), timeInput: $('timeInput'), createBtn: $('createBtn'),
@@ -133,7 +136,7 @@ function connect(name, raceType) {
   });
   ws.addEventListener('close', () => {
     wsOpen = false;
-    setTimeout(connect, 1200);
+    if (isLiveRace) setTimeout(connect, 1200);
   });
 }
 
@@ -339,7 +342,6 @@ function finishOfflineRace() {
 
 // ---------- UI wiring ----------
 el.joinBtn.addEventListener('click', join);
-el.offlineBtn.addEventListener('click', playOffline);
 el.nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
 
 // ---------- visitor name (localStorage) ----------
@@ -359,17 +361,24 @@ function saveVisitorName(name) {
 // Remember the name from the last visit and offer it pre-filled.
 el.nameInput.value = loadVisitorName();
 
+function selectedRaceType() {
+  return raceTypeInputs.find((input) => input.checked)?.value === 'lake' ? 'lake' : 'mobu';
+}
+
 function join() {
   const name = el.nameInput.value.trim();
   saveVisitorName(name);
+  if (!isLiveRace) {
+    playOffline();
+    return;
+  }
   el.join.classList.add('hidden');
   el.hud.classList.remove('hidden');
-  connect(name || undefined, el.raceTypeInput.value);
+  connect(name || undefined, selectedRaceType());
 }
 
 function playOffline() {
-  const name = el.nameInput.value.trim() || 'Offline Host';
-  saveVisitorName(name);
+  const name = 'Race host';
   state.offline = true;
   el.join.classList.add('hidden');
   el.hud.classList.remove('hidden');
@@ -379,7 +388,7 @@ function playOffline() {
     isHost: true,
     users: [{ id: 'offline-host', name, isHost: true }],
     state: 'idle',
-    setup: { names: [], timeSec: 30, raceType: el.raceTypeInput.value },
+    setup: { names: [], timeSec: 30, raceType: selectedRaceType() },
   });
 }
 
@@ -451,7 +460,7 @@ camBtns.forEach((b) => b.addEventListener('click', () => setCamMode(b.dataset.ca
 
 function refreshSetupUI() {
   el.roleBadge.textContent = state.isHost
-    ? (state.offline ? '👑 Offline host' : '👑 You are the Host')
+    ? (state.offline ? '👑 Race host' : '👑 You are the Host')
     : `Watching: ${myName()}`;
   const phase = state.raceState; // idle | ready | counting | racing | finished
   const raceOn = phase === 'counting' || phase === 'racing' || phase === 'finished';

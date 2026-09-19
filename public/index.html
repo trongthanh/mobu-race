@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <meta name="description" content="Mobu Race is a cozy real-time multiplayer 3D race game with giant-lipped mobus, dramatic finishes, and spectator avatars." />
+  <meta name="description" content="Mobu Race is a cozy 3D race game with giant-lipped mobus and dramatic finishes." />
   <meta name="theme-color" content="#87c46b" />
   <link rel="canonical" href="/" />
   <link rel="icon" type="image/png" href="/favicon.png" />
@@ -11,7 +11,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Mobu Race" />
   <meta property="og:title" content="Mobu Race" />
-  <meta property="og:description" content="A cozy real-time multiplayer 3D race with giant-lipped mobus." />
+  <meta property="og:description" content="A cozy 3D race with giant-lipped mobus." />
   <meta property="og:image" content="/cover.png" />
   <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="1024" />
@@ -19,7 +19,7 @@
   <meta property="og:image:alt" content="Mobu Race characters racing around a cozy countryside track" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Mobu Race" />
-  <meta name="twitter:description" content="A cozy real-time multiplayer 3D race with giant-lipped mobus." />
+  <meta name="twitter:description" content="A cozy 3D race with giant-lipped mobus." />
   <meta name="twitter:image" content="/cover.png" />
   <meta name="twitter:image:alt" content="Mobu Race characters racing around a cozy countryside track" />
   <title>Mobu Race</title>
@@ -35,16 +35,27 @@
     <div id="join" class="overlay panel">
       <h1 id="logo">MOBU RACE <img class="logo-mascot" src="/mobu-race.png" alt="" aria-hidden="true" /></h1>
       <p id="subtitle">Pick a course, then make some waves.</p>
-      <label for="raceTypeInput">Race type</label>
-      <select id="raceTypeInput">
-        <option value="mobu" selected>🏁 Countryside Mobu Dash</option>
-        <option value="lake">🦆 Lake Duck Derby</option>
-      </select>
-      <label for="nameInput">Your screen name</label>
-      <input id="nameInput" type="text" maxlength="20" placeholder="Your screen name" autocomplete="off" />
-      <button id="joinBtn" class="btn-green">Join the racecourse</button>
-      <button id="offlineBtn" class="btn-secondary">Play offline in this tab</button>
-      <p id="offlineHint">No connection needed — you’ll host a private race here.</p>
+      <fieldset id="raceTypePicker">
+        <legend>Choose your race</legend>
+        <div class="race-type-options">
+          <label class="race-type-card">
+            <input type="radio" name="raceType" value="mobu" checked />
+            <span class="race-type-icon">🏁</span>
+            <span><strong>Countryside Mobu Dash</strong><small>Race around the cozy dirt track</small></span>
+          </label>
+          <label class="race-type-card">
+            <input type="radio" name="raceType" value="lake" />
+            <span class="race-type-icon">🦆</span>
+            <span><strong>Lake Duck Derby</strong><small>Paddle through a sparkling lake</small></span>
+          </label>
+        </div>
+      </fieldset>
+      <div id="liveIdentity">
+        <label for="nameInput">Your screen name</label>
+        <input id="nameInput" type="text" maxlength="20" placeholder="Your screen name" autocomplete="off" />
+      </div>
+      <button id="joinBtn" class="btn-green">Start racing</button>
+      <a id="offlineLink" href="/">Play a private race instead</a>
     </div>
 
     <!-- HUD -->
