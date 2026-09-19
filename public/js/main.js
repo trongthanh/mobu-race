@@ -11,13 +11,13 @@ import { buildPlan, randomSlots } from './race-plan.js';
 const $ = (id) => document.getElementById(id);
 const el = {
   join: $('join'), nameInput: $('nameInput'), raceTypeInput: $('raceTypeInput'), joinBtn: $('joinBtn'), offlineBtn: $('offlineBtn'),
-  hud: $('hud'), roleBadge: $('roleBadge'),
-  userList: $('userList'), userPanel: $('userPanel'),
-  setupPanel: $('setupPanel'), namesInput: $('namesInput'), timeInput: $('timeInput'), createBtn: $('createBtn'),
+  hud: $('hud'), topbar: $('topbar'), roleBadge: $('roleBadge'),
+  userList: $('userList'), spectatorsPanel: $('spectatorsPanel'), userPanel: $('userPanel'), raceControlTitle: $('raceControlTitle'),
+  setupPanel: $('setupPanel'), namesInput: $('namesInput'), syncVisitorsControl: $('syncVisitorsControl'), syncVisitors: $('syncVisitors'), syncedNames: $('syncedNames'), syncedNameList: $('syncedNameList'), timeInput: $('timeInput'), createBtn: $('createBtn'),
   quickCount: $('quickCount'), quickGenBtn: $('quickGenBtn'),
   readyPanel: $('readyPanel'), readyInfo: $('readyInfo'), startBtn: $('startBtn'), cancelBtn: $('cancelBtn'),
   readyWaiting: $('readyWaiting'), readyWaitingInfo: $('readyWaitingInfo'),
-  waitingPanel: $('waitingPanel'), setupInfo: $('setupInfo'),
+  waitingPanel: $('waitingPanel'), setupInfo: $('setupInfo'), waitingRacers: $('waitingRacers'), waitingRacerList: $('waitingRacerList'),
   camPanel: $('camPanel'),
   raceHud: $('raceHud'), timer: $('timer'), lbList: $('lbList'), leaderboard: $('leaderboard'),
   countdown: $('countdown'),
@@ -29,10 +29,14 @@ const confetti = createConfetti(el.confettiCanvas);
 
 // The camera controls can wrap or grow when fonts load. Reserve their actual
 // height on every viewport, not just narrow screens, so the sidebar never overlaps.
-new ResizeObserver(() => {
-  const height = el.camPanel.getBoundingClientRect().height;
-  if (height > 0) el.userPanel.style.setProperty('--camera-panel-height', `${height}px`);
-}).observe(el.camPanel);
+const panelResizeObserver = new ResizeObserver(() => {
+  const cameraHeight = el.camPanel.getBoundingClientRect().height;
+  if (cameraHeight > 0) el.userPanel.style.setProperty('--camera-panel-height', `${cameraHeight}px`);
+  const topbarHeight = el.topbar.getBoundingClientRect().height;
+  if (topbarHeight > 0) el.spectatorsPanel.style.setProperty('--topbar-height', `${topbarHeight}px`);
+});
+panelResizeObserver.observe(el.camPanel);
+panelResizeObserver.observe(el.topbar);
 
 // ---------- Three.js setup ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -87,7 +91,7 @@ const state = {
   offline: false,
   users: [],
   hostId: null,
-  setup: { names: [], timeSec: 30, raceType: 'mobu' },
+  setup: { names: [], manualNames: [], syncedNames: [], syncVisitors: false, timeSec: 30, raceType: 'mobu' },
   raceState: 'idle', // idle | ready | counting | racing | finished
   racers: [],        // {id,name,lane,slot, lateral, startFrac, mobu refs, progress, finished}
   plan: null,
@@ -208,6 +212,12 @@ function handle(msg) {
     }
     case 'race_finish':
       showCongrats(msg);
+      break;
+    case 'error':
+      console.warn(`Server rejected request (${msg.code || 'error'}): ${msg.message || 'Unknown error'}`);
+      if (msg.code === 'name_taken' || msg.code === 'name_too_long') {
+        el.roleBadge.textContent = `⚠️ ${msg.message || 'Screen name rejected'}`;
+      }
       break;
     case 'reset':
       state.raceState = 'idle';
@@ -371,6 +381,7 @@ function playOffline() {
 }
 
 el.namesInput.addEventListener('input', sendSetup);
+el.syncVisitors.addEventListener('change', () => sendSetupNow());
 el.timeInput.addEventListener('input', sendSetup);
 el.createBtn.addEventListener('click', () => {
   sendSetupNow(); // flush the latest field contents (also persists the draft)
@@ -393,30 +404,31 @@ const TIME_STEPS = [10, 20, 30, 60, 90, 120];
 function loadDraft() {
   try {
     const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
-    if (!raw || !Array.isArray(raw.names)) return { names: [], timeSec: 30 }; 
+    if (!raw || !Array.isArray(raw.names)) return { names: [], timeSec: 30, syncVisitors: false };
     const names = raw.names
       .filter((n) => typeof n === 'string' && n.trim())
       .map((n) => n.trim().slice(0, 20))
       .slice(0, 12);
     const timeSec = TIME_STEPS.includes(Number(raw.timeSec)) ? Number(raw.timeSec) : 30;
-    return { names, timeSec };
+    return { names, timeSec, syncVisitors: Boolean(raw.syncVisitors) };
   } catch {
-    return { names: [], timeSec: 30 }; 
+    return { names: [], timeSec: 30, syncVisitors: false };
   }
 }
 
-function saveDraft(names, timeSec) {
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ names, timeSec })); } catch { /* private mode */ }
+function saveDraft(names, timeSec, syncVisitors) {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ names, timeSec, syncVisitors })); } catch { /* private mode */ }
 }
 
 const draft = loadDraft();
 let draftSeeded = false;
 
-function sendSetupNow(names = null, timeSec = null) {
+function sendSetupNow(names = null, timeSec = null, syncVisitors = null) {
   const n = names ?? el.namesInput.value.split('\n').map((s) => s.trim()).filter(Boolean);
   const t = timeSec ?? (Number(el.timeInput.value) || 30);
-  saveDraft(n, t);
-  send({ type: 'setup', names: n, timeSec: t, raceType: state.setup.raceType });
+  const sync = syncVisitors ?? el.syncVisitors.checked;
+  saveDraft(n, t, sync);
+  send({ type: 'setup', names: n, syncVisitors: sync, timeSec: t, raceType: state.setup.raceType });
 }
 
 let setupTimer = null;
@@ -443,7 +455,12 @@ function refreshSetupUI() {
   // Keep the screen clear while a race is on: the panels belong to the paddock
   // and to the "on the line" moment between create and start.
   el.userPanel.classList.toggle('hidden', raceOn);
+  // This matches the previous paddock-only spectator list and leaves the
+  // leaderboard unobstructed once countdown/racing begins.
+  el.spectatorsPanel.classList.toggle('hidden', raceOn || state.offline);
+  el.raceControlTitle.classList.toggle('hidden', !state.isHost || raceOn);
   el.setupPanel.classList.toggle('hidden', !state.isHost || phase !== 'idle');
+  el.syncVisitorsControl.classList.toggle('hidden', state.offline);
   el.readyPanel.classList.toggle('hidden', !state.isHost || phase !== 'ready');
   el.readyWaiting.classList.toggle('hidden', state.isHost || phase !== 'ready');
   el.waitingPanel.classList.toggle('hidden', state.isHost || phase !== 'idle');
@@ -456,17 +473,41 @@ function refreshSetupUI() {
     !state.setup.names.length && draft.names.length
   ) {
     draftSeeded = true;
-    state.setup = { names: draft.names.slice(), timeSec: draft.timeSec, raceType: state.setup.raceType };
-    sendSetupNow(state.setup.names, state.setup.timeSec);
+    state.setup = {
+      names: draft.names.slice(),
+      manualNames: draft.names.slice(),
+      syncedNames: [],
+      syncVisitors: draft.syncVisitors,
+      timeSec: draft.timeSec,
+      raceType: state.setup.raceType,
+    };
+    sendSetupNow(draft.names, draft.timeSec, draft.syncVisitors);
   }
-  if (state.isHost && phase === 'idle' && document.activeElement !== el.namesInput) {
-    el.namesInput.value = state.setup.names.join('\n');
+  if (state.isHost && phase === 'idle') {
+    const manualNames = state.setup.manualNames || state.setup.names;
+    if (document.activeElement !== el.namesInput) el.namesInput.value = manualNames.join('\n');
+    el.syncVisitors.checked = Boolean(state.setup.syncVisitors);
     el.timeInput.value = state.setup.timeSec;
+    el.syncedNames.classList.toggle('hidden', !state.setup.syncVisitors);
+    el.syncedNameList.innerHTML = '';
+    for (const name of state.setup.syncedNames || []) {
+      const li = document.createElement('li');
+      li.textContent = name;
+      el.syncedNameList.appendChild(li);
+    }
   }
   const n = state.setup.names.length;
   const plural = n === 1 ? '' : 's';
   const course = state.setup.raceType === 'lake' ? '🦆 Lake Duck Derby' : '🏁 Countryside Mobu Dash';
   el.setupInfo.textContent = `${n} racer${plural} signed up · ${state.setup.timeSec}s · ${course}`;
+  el.waitingRacers.classList.toggle('hidden', n === 0);
+  el.waitingRacerList.innerHTML = '';
+  const syncedCount = (state.setup.syncedNames || []).length;
+  for (const [index, name] of state.setup.names.entries()) {
+    const li = document.createElement('li');
+    li.textContent = index < syncedCount ? `${name} 👤` : name;
+    el.waitingRacerList.appendChild(li);
+  }
   el.readyInfo.textContent = `${n} racer${plural} on the line · ${state.setup.timeSec}s · ${course}`;
   el.readyWaitingInfo.textContent = `${n} racer${plural} on the line · ${state.setup.timeSec}s — ${course} is ready…`;
   el.createBtn.disabled = n < 2;

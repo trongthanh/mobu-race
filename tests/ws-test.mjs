@@ -101,8 +101,30 @@ async function main() {
   }
   console.log('STEP 2: rename -> users broadcast with new name OK');
 
-  // 3. A setup
-  send(A, { type: 'setup', names: ['Alpha', 'Beta', 'Gamma'], timeSec: 20, raceType: 'lake' });
+  // 2b. Duplicate and overlong screen names are rejected without changing C.
+  for (const ws of [A, B, C]) ws.messages.length = 0;
+  send(C, { type: 'rename', name: 'Bee' });
+  const duplicate = await waitFor(C, (m) => m.type === 'error' && m.code === 'name_taken', 'duplicate-name rejection');
+  assert.match(duplicate.message, /already in use/i);
+  send(C, { type: 'rename', name: 'x'.repeat(21) });
+  const tooLong = await waitFor(C, (m) => m.type === 'error' && m.code === 'name_too_long', 'overlong-name rejection');
+  assert.match(tooLong.message, /20 characters/i);
+  assert.ok(!C.messages.some((m) => m.type === 'users'), 'rejected names do not broadcast a user change');
+  console.log('STEP 2b: duplicate and overlong screen names rejected OK');
+
+  // 2c. With visitor sync enabled, non-host screen names lead the roster and
+  // are carried in the server-authoritative setup snapshot.
+  send(A, { type: 'setup', names: ['Alpha'], syncVisitors: true, timeSec: 20, raceType: 'lake' });
+  for (const [ws, label] of [[A, 'A'], [B, 'B'], [C, 'C']]) {
+    const s = await waitFor(ws, (m) => m.type === 'setup_updated' && m.setup.syncVisitors, `synced setup on ${label}`);
+    assert.deepStrictEqual(s.setup.names, ['Bee', 'Watcher#03', 'Alpha']);
+    assert.deepStrictEqual(s.setup.syncedNames, ['Bee', 'Watcher#03']);
+    assert.deepStrictEqual(s.setup.manualNames, ['Alpha']);
+  }
+  console.log('STEP 2c: visitor sync adds spectators but not the host OK');
+
+  // 3. Turning sync off removes the visitor set, leaving host-entered names.
+  send(A, { type: 'setup', names: ['Alpha', 'Beta', 'Gamma'], syncVisitors: false, timeSec: 20, raceType: 'lake' });
   for (const [ws, label] of [[A, 'A'], [B, 'B'], [C, 'C']]) {
     const s = await waitFor(ws, (m) => m.type === 'setup_updated', `setup_updated on ${label}`);
     assert.deepStrictEqual(s.setup.names, ['Alpha', 'Beta', 'Gamma']);

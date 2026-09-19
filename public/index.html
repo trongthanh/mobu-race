@@ -54,14 +54,28 @@
         <span id="roleBadge">Watching: …</span>
       </div>
 
-      <div id="userPanel" class="panel">
+      <div id="spectatorsPanel" class="panel">
         <h3>Spectators</h3>
         <ul id="userList"></ul>
+      </div>
 
+      <div id="userPanel" class="panel">
+        <h3 id="raceControlTitle" class="hidden">Race control</h3>
         <!-- Step 1: name the racers, pick the duration, create the race -->
         <div id="setupPanel" class="hidden">
+          <div id="syncVisitorsControl">
+            <label class="sync-visitors" for="syncVisitors">
+              <input id="syncVisitors" type="checkbox" />
+              Add spectators as racers
+            </label>
+          </div>
           <label for="namesInput">Racer names</label>
-          <textarea id="namesInput" rows="6" placeholder="One racer name per line"></textarea>
+          <div id="racerNamesBox">
+            <div id="syncedNames" class="hidden" aria-live="polite">
+              <ul id="syncedNameList"></ul>
+            </div>
+            <textarea id="namesInput" rows="6" placeholder="One racer name per line"></textarea>
+          </div>
           <label for="quickCount">Generate numbered racers</label>
           <div class="quick-row">
             <input id="quickCount" type="number" min="2" max="12" value="8" inputmode="numeric" aria-label="Number of racers" />
@@ -93,6 +107,10 @@
         <div id="waitingPanel">
           <p>Waiting for the host to set up the race…</p>
           <p id="setupInfo">0 racers signed up</p>
+          <div id="waitingRacers" class="hidden" aria-live="polite">
+            <div class="field-label">Racers signed up</div>
+            <ol id="waitingRacerList"></ol>
+          </div>
         </div>
       </div>
 

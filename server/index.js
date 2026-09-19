@@ -8,10 +8,16 @@ import { WebSocketServer } from 'ws';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------- helpers ----------
-function sanitizeName(raw, fallback) {
-  if (typeof raw !== 'string') return fallback;
-  const s = raw.trim().slice(0, 20);
-  return s || fallback;
+function screenName(raw) {
+  if (typeof raw !== 'string') return null;
+  const name = raw.trim();
+  if (!name) return null;
+  if (name.length > 20) return { error: 'name_too_long' };
+  return { name };
+}
+
+function sameName(a, b) {
+  return a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
 }
 
 // Host can only pick from these race durations; the track ring scales with it.
@@ -27,16 +33,16 @@ function snapTimeStep(v, dflt = 30) {
 
 function sanitizeSetup(payload) {
   const namesRaw = Array.isArray(payload?.names) ? payload.names : [];
-  const names = [];
+  const manualNames = [];
   for (const n of namesRaw) {
     if (typeof n !== 'string') continue;
     const s = n.trim().slice(0, 20);
-    if (s) names.push(s);
-    if (names.length >= 12) break;
+    if (s) manualNames.push(s);
+    if (manualNames.length >= 12) break;
   }
   const timeSec = snapTimeStep(payload?.timeSec, 30);
   const raceType = RACE_TYPES.has(payload?.raceType) ? payload.raceType : 'mobu';
-  return { names, timeSec, raceType };
+  return { manualNames, syncVisitors: Boolean(payload?.syncVisitors), timeSec, raceType };
 }
 
 // Linear interpolation of plan keyframes [[t, progress], ...] at time t.
@@ -251,7 +257,7 @@ export function createGameServer(httpServer) {
   // ---- game state ----
   const users = new Map(); // ws -> user {id, name, isHost, joinedAt, index}
   let state = 'idle'; // idle | ready | countdown | racing | finished
-  let setup = { names: [], timeSec: 30, raceType: 'mobu' };
+  let setup = { manualNames: [], syncVisitors: false, timeSec: 30, raceType: 'mobu' };
   let race = null; // {timers, racers+slots, timeSec, plan, winnerId, startAt, leaderId, leaderTimer, lastResults}
 
   const send = (ws, obj) => {
@@ -270,16 +276,39 @@ export function createGameServer(httpServer) {
 
   const hostUser = () => [...users.values()].find((u) => u.isHost) || null;
 
+  // Visitor names are server-derived so every client gets the same roster and
+  // a reconnect, rename, or host transfer cannot leave stale racer names behind.
+  function setupSnapshot() {
+    const syncedNames = setup.syncVisitors
+      ? [...users.values()].filter((u) => !u.isHost).sort((a, b) => a.index - b.index).map((u) => u.name)
+      : [];
+    const names = syncedNames.concat(setup.manualNames).slice(0, 12);
+    return {
+      names,
+      manualNames: setup.manualNames,
+      syncedNames: syncedNames.slice(0, 12),
+      syncVisitors: setup.syncVisitors,
+      timeSec: setup.timeSec,
+      raceType: setup.raceType,
+    };
+  }
+
+  function broadcastSetup() {
+    broadcast({ type: 'setup_updated', setup: setupSnapshot() });
+  }
+
   function promoteHost() {
     if (hostUser()) return;
     const next = [...users.values()].sort((a, b) => a.index - b.index)[0];
     if (!next) return;
     next.isHost = true;
     broadcast({ type: 'host_changed', hostId: next.id, users: userList() });
+    if (setup.syncVisitors) broadcastSetup();
   }
 
   function broadcastUsers() {
     broadcast({ type: 'users', users: userList() });
+    if (setup.syncVisitors) broadcastSetup();
   }
 
   function clearRaceTimers() {
@@ -381,7 +410,7 @@ export function createGameServer(httpServer) {
     if (race && race.leaderTimer) clearInterval(race.leaderTimer);
     race = null;
     state = 'idle';
-    broadcast({ type: 'reset', setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType } });
+    broadcast({ type: 'reset', setup: setupSnapshot() });
   }
 
   // ---- connection handling ----
@@ -402,7 +431,7 @@ export function createGameServer(httpServer) {
       isHost: user.isHost,
       users: userList(),
       state,
-      setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType },
+      setup: setupSnapshot(),
     };
     // Late joiners catch up to whatever stage the race is at.
     if (state === 'ready' && race) {
@@ -443,32 +472,45 @@ export function createGameServer(httpServer) {
         case 'hello':
           if (!user.joined) {
             user.joined = true;
-            user.name = sanitizeName(msg.name, user.name);
+            const result = screenName(msg.name);
+            if (result?.error) send(ws, { type: 'error', code: result.error, message: 'Screen names can be at most 20 characters.' });
+            else if (result?.name && [...users.values()].some((u) => u !== user && sameName(u.name, result.name))) {
+              send(ws, { type: 'error', code: 'name_taken', message: 'That screen name is already in use.' });
+            } else if (result?.name) user.name = result.name;
             if (user.isHost && state === 'idle' && RACE_TYPES.has(msg.raceType)) {
               setup = { ...setup, raceType: msg.raceType };
-              broadcast({ type: 'setup_updated', setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType } });
+              broadcastSetup();
             }
             broadcastUsers();
           }
           return;
-        case 'rename':
-          user.name = sanitizeName(msg.name, user.name);
-          broadcastUsers();
+        case 'rename': {
+          const result = screenName(msg.name);
+          if (result?.error) send(ws, { type: 'error', code: result.error, message: 'Screen names can be at most 20 characters.' });
+          else if (!result?.name) send(ws, { type: 'error', code: 'invalid_name', message: 'Enter a screen name.' });
+          else if ([...users.values()].some((u) => u !== user && sameName(u.name, result.name))) {
+            send(ws, { type: 'error', code: 'name_taken', message: 'That screen name is already in use.' });
+          } else {
+            user.name = result.name;
+            broadcastUsers();
+          }
           return;
+        }
         case 'setup': {
           if (!user.isHost || state !== 'idle') return;
           setup = sanitizeSetup(msg);
-          broadcast({ type: 'setup_updated', setup: { names: setup.names, timeSec: setup.timeSec, raceType: setup.raceType } });
+          broadcastSetup();
           return;
         }
         case 'create': {
           // Step 1 of the setup: lock the field and put the racers on the line.
-          if (!user.isHost || state !== 'idle' || setup.names.length < 2) return;
-          const slots = randomSlots(setup.names.length);
+          const roster = setupSnapshot().names;
+          if (!user.isHost || state !== 'idle' || roster.length < 2) return;
+          const slots = randomSlots(roster.length);
           // Costumes are not controllable: every create rolls a fresh random
           // seed per racer and clients derive the outfit from it, so all
           // clients see the same (re)shuffled wardrobe.
-          const racers = setup.names.map((name, i) => ({
+          const racers = roster.map((name, i) => ({
             id: 'r' + i,
             name,
             lane: i,
@@ -500,6 +542,7 @@ export function createGameServer(httpServer) {
               for (const o of users.values()) o.isHost = false;
               u.isHost = true;
               broadcast({ type: 'host_changed', hostId: u.id, users: userList() });
+              if (setup.syncVisitors) broadcastSetup();
               return;
             }
           }

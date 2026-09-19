@@ -178,7 +178,21 @@ label, .field-label {
 
 #roleBadge { font-size: 15px; }
 
-/* ---------- User panel ---------- */
+/* ---------- Spectators and race-control panels ---------- */
+#spectatorsPanel {
+  position: fixed;
+  /* Below the role badge, whose height can grow when its text wraps. */
+  top: calc(24px + var(--topbar-height, 40px));
+  left: 12px;
+  width: 230px;
+  max-height: calc(100dvh - 76px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#spectatorsPanel > h3 { flex-shrink: 0; }
+
 #userPanel {
   position: fixed;
   top: 12px;
@@ -191,7 +205,7 @@ label, .field-label {
   overflow: hidden;
 }
 
-#userPanel > h3, #readyPanel, #readyWaiting, #waitingPanel { flex-shrink: 0; }
+#readyPanel, #readyWaiting, #waitingPanel { flex-shrink: 0; }
 
 #userList {
   list-style: none;
@@ -222,14 +236,51 @@ label, .field-label {
 }
 
 #setupPanel {
-  margin-top: 10px;
-  border-top: 2px dashed #d9b98a;
-  padding-top: 10px;
   min-height: 0;
   overflow-y: auto;
 }
 
 #createBtn { margin-top: 10px; }
+
+.sync-visitors {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #8a5a2b;
+}
+
+.sync-visitors input { width: auto; margin: 0; accent-color: #58b24a; }
+
+#racerNamesBox {
+  overflow: hidden;
+  background: #fffdf5;
+  border: 3px solid #d9b98a;
+  border-radius: 12px;
+}
+
+#racerNamesBox:focus-within { border-color: #58b24a; }
+
+#syncedNames {
+  padding: 7px 10px;
+  background: #fff1ce;
+  border-bottom: 2px dashed #d9b98a;
+}
+
+#syncedNameList { list-style: none; }
+#syncedNameList li { padding: 1px 0; font-size: 13px; color: #8a5a2b; }
+#syncedNameList li::before { content: '👤'; margin-right: 6px; }
+
+#racerNamesBox #namesInput {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+#racerNamesBox #namesInput:focus { border-color: transparent; }
 
 /* numbered-racer quick generator row: the count and Generate button stay on one line. */
 .quick-row {
@@ -301,6 +352,22 @@ label, .field-label {
 #readyWaiting p { font-size: 13px; color: #8a5a2b; }
 
 #waitingPanel p { font-size: 13px; color: #8a5a2b; margin-top: 8px; }
+
+#waitingRacers {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 2px dashed #d9b98a;
+}
+
+#waitingRacers .field-label { margin: 0 0 3px; }
+
+#waitingRacerList {
+  max-height: 105px;
+  padding-left: 22px;
+  overflow-y: auto;
+}
+
+#waitingRacerList li { padding: 1px 0; font-size: 13px; color: #8a5a2b; }
 
 /* ---------- Camera panel ---------- */
 #camPanel {
@@ -438,7 +505,8 @@ label, .field-label {
 @media (max-width: 640px) {
   #join h1 { font-size: 34px; }
 
-  #userPanel {
+  #userPanel,
+  #spectatorsPanel {
     width: 170px;
     font-size: 13px;
   }
@@ -461,4 +529,10 @@ label, .field-label {
   #camPanel { bottom: 12px; }
   #camPanel .cam-row { flex-wrap: wrap; }
   .cam-btn { padding: 6px 4px; font-size: 12px; }
+}
+
+/* Keep the race controls at their usable 170px width on very narrow phones.
+   The spectator panel yields width instead of overlapping the controls. */
+@media (max-width: 380px) {
+  #spectatorsPanel { width: calc(100vw - 206px); }
 }
