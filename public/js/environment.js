@@ -448,7 +448,7 @@ export function createWorld(opts = {}) {
   // Travel at progress 0 runs along X, so the stripe is thin along X and spans
   // the lane band along Z.
   const stripeW = lanes * laneWidth + 0.8;
-  const stripeZ = b + (lanes - 1) * laneWidth / 2; // center of lane band at progress 0
+  const stripeZ = bC; // center of the lane band at progress 0
   if (isLake) {
     // A shallow row of reeds marks the line without turning it into a dock.
     const reedMat = stdMat(0x3f7837);
@@ -466,23 +466,25 @@ export function createWorld(opts = {}) {
       }
     }
   } else {
-    const stripe = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.8, stripeW),
-      stdMat(0xffffff, { roughness: 0.7 })
-    );
-    stripe.rotation.x = -Math.PI / 2;
-    stripe.position.set(0, 0.04, stripeZ);
-    stripe.receiveShadow = true;
-    group.add(stripe);
-    // checker squares: two columns along travel (X) x one row per lane (Z)
-    const sqMat1 = stdMat(0x333333);
-    const sqGeo = new THREE.PlaneGeometry(0.4, 0.4);
-    for (let i = 0; i < lanes; i++) {
-      for (let j = 0; j < 2; j++) {
-        if ((i + j) % 2 === 0) continue;
-        const sq = new THREE.Mesh(sqGeo, sqMat1);
+    // A real two-column chessboard, rather than a few small dark marks on a
+    // white stripe. The cells stay square and tile the whole track width so
+    // the line reads clearly from every camera angle.
+    const checkCell = 0.4;
+    const checkCols = 2;
+    const checkRows = Math.round(stripeW / checkCell);
+    const checkBlack = stdMat(0x292323, { roughness: 0.72 });
+    const checkWhite = stdMat(0xfff4df, { roughness: 0.72 });
+    const checkGeo = new THREE.PlaneGeometry(checkCell, checkCell);
+    for (let row = 0; row < checkRows; row++) {
+      for (let col = 0; col < checkCols; col++) {
+        const sq = new THREE.Mesh(checkGeo, (row + col) % 2 ? checkBlack : checkWhite);
         sq.rotation.x = -Math.PI / 2;
-        sq.position.set((j - 0.5) * 0.4, 0.045, b + i * laneWidth);
+        sq.position.set(
+          (col - (checkCols - 1) / 2) * checkCell,
+          0.045,
+          stripeZ + (row - (checkRows - 1) / 2) * checkCell,
+        );
+        sq.receiveShadow = true;
         group.add(sq);
       }
     }

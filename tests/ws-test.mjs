@@ -146,17 +146,30 @@ async function main() {
   assert.strictEqual(rc.raceType, 'lake');
   assert.strictEqual(rc.racers.length, 3);
   assert.deepStrictEqual(rc.racers.map((r) => r.lane).sort(), [0, 1, 2]);
-  for (const r of rc.racers) {
+  const frontRowCount = Math.min(5, rc.racers.length);
+  for (const [i, r] of rc.racers.entries()) {
     assert.strictEqual(r.lane, Number(r.id.slice(1)), 'lane matches rN');
     assert.ok(r.slot, 'racer has a start slot');
     assert.ok(Number.isFinite(r.slot.lateral) && Math.abs(r.slot.lateral) <= 3.3, 'lateral stays on the dirt');
     assert.ok(Number.isFinite(r.slot.behind) && r.slot.behind >= 0.5 && r.slot.behind <= 5, 'starts behind the line');
+    if (i < frontRowCount) {
+      assert.ok(r.slot.behind <= 1.3, 'front row stays close to the start line');
+    } else {
+      assert.ok(r.slot.behind >= 1.8, 'back rows stay behind the front row');
+    }
     assert.ok(
       Number.isInteger(r.costumeSeed) && r.costumeSeed >= 0 && r.costumeSeed < 0x100000000,
       'racer carries a costume seed',
     );
   }
-  console.log('STEP 3b: create -> race_created with slots and costume seeds OK');
+  const frontSlots = rc.racers.slice(0, frontRowCount).map((r) => r.slot);
+  const frontDepths = frontSlots.map((slot) => slot.behind);
+  assert.strictEqual(Math.max(...frontDepths), Math.min(...frontDepths), 'front row is filled at one depth');
+  const frontLaterals = frontSlots.map((slot) => slot.lateral).sort((a, b) => a - b);
+  for (let i = 1; i < frontLaterals.length; i++) {
+    assert.ok(frontLaterals[i] - frontLaterals[i - 1] >= 1.5, 'front row racers are paced across the track');
+  }
+  console.log('STEP 3b: create -> race_created with paced slots and costume seeds OK');
 
   // 4. A start (step 2) -> countdown 3,2,1 then race_start
   send(A, { type: 'start' });

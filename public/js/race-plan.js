@@ -102,14 +102,33 @@ export function buildPlan(names, timeSec) {
 
 export function randomSlots(count) {
   const slots = [];
+  const frontCount = Math.min(5, count);
+  const frontBehind = 0.75;
+  // Keep the front row evenly paced across the track, but shuffle which racer
+  // gets each position so roster order does not dictate the visual lineup.
+  const frontHalf = Math.min(3.1, 0.85 * Math.max(0, frontCount - 1));
+  const frontLaterals = Array.from({ length: frontCount }, (_, i) =>
+    frontCount === 1 ? 0 : -frontHalf + (2 * frontHalf * i) / (frontCount - 1));
+  for (let i = frontLaterals.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [frontLaterals[i], frontLaterals[j]] = [frontLaterals[j], frontLaterals[i]];
+  }
+
   let minDist = 1.7;
   for (let i = 0; i < count; i++) {
     let slot = null;
     for (let tries = 0; tries < 80; tries++) {
       if (tries === 40) minDist = 1.0;
+      const isFrontRow = i < frontCount;
       const cand = {
-        lateral: (Math.random() * 2 - 1) * 3.3,
-        behind: 0.5 + Math.random() * 4.5,
+        lateral: isFrontRow
+          ? frontLaterals[i]
+          : (Math.random() * 2 - 1) * 3.3,
+        // Mirror the server grid: up to five mobus stand close to the stripe,
+        // while the rest remain randomly spaced farther back.
+        behind: isFrontRow
+          ? frontBehind
+          : 1.8 + Math.random() * 3.2,
       };
       slot = cand;
       if (slots.every((s) => Math.hypot(s.lateral - cand.lateral, (s.behind - cand.behind) * 1.3) >= minDist)) break;

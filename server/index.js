@@ -226,19 +226,40 @@ export function buildPlan(names, timeSec) {
   return { plan, winnerIdx };
 }
 
-// Random starting spots just behind the start line. With big fields, spreading
-// racers across lanes would push them off the dirt, so everyone gets a random
-// spot inside the lane band (±3.3 of the 4.4 half-band) instead of a lane slot.
+// Put a small front row close to the start line, then spread the rest behind
+// it. With big fields, spreading racers across lanes would push them off the
+// dirt, so everyone stays inside the lane band (±3.3 of the 4.4 half-band)
+// instead of getting a fixed lane slot.
 function randomSlots(count) {
   const slots = [];
+  const frontCount = Math.min(5, count);
+  const frontBehind = 0.75;
+  // A paced front row uses the available lane band instead of clustering by
+  // chance in the middle. Shuffle the positions so roster order is not also
+  // the visual left-to-right order.
+  const frontHalf = Math.min(3.1, 0.85 * Math.max(0, frontCount - 1));
+  const frontLaterals = Array.from({ length: frontCount }, (_, i) =>
+    frontCount === 1 ? 0 : -frontHalf + (2 * frontHalf * i) / (frontCount - 1));
+  for (let i = frontLaterals.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [frontLaterals[i], frontLaterals[j]] = [frontLaterals[j], frontLaterals[i]];
+  }
+
   let minDist = 1.7;
   for (let i = 0; i < count; i++) {
     let slot = null;
     for (let tries = 0; tries < 80; tries++) {
       if (tries === 40) minDist = 1.0; // relax spacing for big fields
+      const isFrontRow = i < frontCount;
       const cand = {
-        lateral: (Math.random() * 2 - 1) * 3.3,
-        behind: 0.5 + Math.random() * 4.5,
+        lateral: isFrontRow
+          ? frontLaterals[i]
+          : (Math.random() * 2 - 1) * 3.3,
+        // Keep the first five in a compact line by the stripe. The remaining
+        // racers retain the old random feel while staying visibly behind it.
+        behind: isFrontRow
+          ? frontBehind
+          : 1.8 + Math.random() * 3.2,
       };
       slot = cand;
       const ok = slots.every((s) =>

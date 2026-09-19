@@ -99,6 +99,9 @@ const state = {
   raceStartAt: 0,    // local clock ms (set on race_start)
   leaderId: null,
   winnerId: null,
+  // Ready-state camera anchors are derived from the server-authoritative grid:
+  // Front uses the centre racer in the first row; Chase uses the backmost one.
+  cameraTargets: { frontId: null, chaseId: null },
   watchers: new Map(), // userId -> {group, animate, sprite, spot}
 };
 
@@ -594,7 +597,7 @@ const BAND_MAX = 3.3;  // lateral limit that keeps racers on the dirt
 const sepPushes = [];
 
 // Step 1 of the setup: the ring is rebuilt for the chosen duration and the
-// racers appear standing at their random spots behind the start line.
+// racers appear standing at their grid spots behind the start line.
 function onRaceCreated(msg) {
   state.raceState = 'ready';
   state.plan = null;
@@ -646,6 +649,26 @@ function buildRaceScene(msg) {
       progress: 0, finished: false, finishElapsed: null,
     });
   }
+
+  // The first five slots form the close front row. Pick its central racer for
+  // Front, and the furthest-back starting slot for Chase, rather than relying
+  // on roster order (which made both ready-state views feel random).
+  const byBehind = state.racers.slice().sort((a, b) => {
+    const aBehind = Number.isFinite(a.slot?.behind) ? a.slot.behind : 1;
+    const bBehind = Number.isFinite(b.slot?.behind) ? b.slot.behind : 1;
+    return aBehind - bBehind || Math.abs(a.lateral) - Math.abs(b.lateral) ||
+      String(a.id).localeCompare(String(b.id));
+  });
+  const frontRow = byBehind.slice(0, Math.min(5, byBehind.length));
+  const frontMiddle = frontRow.slice().sort((a, b) =>
+    Math.abs(a.lateral) - Math.abs(b.lateral) ||
+    (a.slot?.behind ?? 1) - (b.slot?.behind ?? 1) ||
+    String(a.id).localeCompare(String(b.id)))[0];
+  const lastLine = byBehind[byBehind.length - 1];
+  state.cameraTargets = {
+    frontId: frontMiddle?.id ?? null,
+    chaseId: lastLine?.id ?? null,
+  };
 }
 
 // Plan progress 0 is the start line; racers begin `behind` meters before it.
@@ -714,6 +737,7 @@ function clearRaceScene() {
   state.plan = null;
   state.leaderId = null;
   state.winnerId = null;
+  state.cameraTargets = { frontId: null, chaseId: null };
   lbRows.clear();
   el.lbList.innerHTML = '';
   el.raceHud.classList.add('hidden');
@@ -917,15 +941,25 @@ function stableLeaderHeading(leader) {
 
 function updateCamera(dt) {
   const leader = state.racers.find((r) => r.id === state.leaderId) || state.racers[0];
-  const leaderPos = leader ? leader.group.position : _v.set(0, 0, world.track.b);
-  // Ease the focus point toward the leader (~0.3s to settle after a swap).
+  // Before the countdown there is no race leader yet. Use the intentional
+  // grid anchors for the two close-up views; once racing starts, both return
+  // to following the live leader as before.
+  const gridView = state.raceState === 'ready' || state.raceState === 'counting';
+  const gridTargetId = camMode === 'front'
+    ? state.cameraTargets.frontId
+    : camMode === 'chase' ? state.cameraTargets.chaseId : null;
+  const focus = gridView && gridTargetId
+    ? state.racers.find((r) => r.id === gridTargetId) || leader
+    : leader;
+  const leaderPos = focus ? focus.group.position : _v.set(0, 0, world.track.b);
+  // Ease the focus point toward the selected racer (~0.3s to settle after a swap).
   if (!camFocusInit) {
     camFocus.copy(leaderPos);
-    if (leader) camHeading = stableLeaderHeading(leader);
+    if (focus) camHeading = stableLeaderHeading(focus);
     camFocusInit = true;
   }
   camFocus.lerp(leaderPos, 1 - Math.exp(-3.5 * dt));
-  if (leader) camHeading = lerpAngle(camHeading, stableLeaderHeading(leader), 1 - Math.exp(-4 * dt));
+  if (focus) camHeading = lerpAngle(camHeading, stableLeaderHeading(focus), 1 - Math.exp(-4 * dt));
   const t = camFocus;
 
   let az, el, dist;
@@ -940,9 +974,9 @@ function updateCamera(dt) {
     // view with the racers visible beyond.
     el = 0.42 + dragEl;
     dist = 11 * zoom;
-    const progress = leader ? (leader.dispP ?? -leader.startFrac) : 0;
+    const progress = focus ? (focus.dispP ?? -focus.startFrac) : 0;
     const aheadP = progress + Math.cos(el) * dist / world.track.length;
-    const aheadPos = world.lanePoint(aheadP, leader?.sepLat ?? 0);
+    const aheadPos = world.lanePoint(aheadP, focus?.sepLat ?? 0);
     const height = Math.max(1.5, Math.sin(el) * dist);
     camera.position.set(aheadPos.x + Math.sin(dragAz) * dist, height, aheadPos.z);
     camera.lookAt(t.x, 1.2, t.z);
