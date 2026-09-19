@@ -1,7 +1,5 @@
 TODO.md
-.pi/tasks/
-.pi/delegate/
-.pi/verification/
+.pi/
 
 node_modules/
 dist/
