@@ -1084,9 +1084,10 @@ function tick(timestamp) {
     for (let i = 0; i < n; i++) {
       const r = state.racers[i];
       const step = Math.min(dt, 0.05);
-      const lake = state.setup.raceType === 'lake';
+      // Separation is part of the shared race presentation, not a duck-vs-mobu
+      // rule. Both skins use the same lateral response and track boundaries.
       const desiredVelocity = THREE.MathUtils.clamp((r.lateral - r.sepLat) * 0.6 + sepPushes[i] * 4, -1.2, 1.2);
-      r.lateralVelocity += (desiredVelocity - r.lateralVelocity) * (1 - Math.exp(-(lake ? 3 : 7) * step));
+      r.lateralVelocity += (desiredVelocity - r.lateralVelocity) * (1 - Math.exp(-7 * step));
       r.sepLat = THREE.MathUtils.clamp(r.sepLat + r.lateralVelocity * step, -BAND_MAX, BAND_MAX);
       const pos = world.lanePoint(r.dispP, r.sepLat);
       r.group.position.set(pos.x, pos.y, pos.z);
