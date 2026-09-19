@@ -36,7 +36,6 @@
       <h1 id="logo">MOBU RACE <img class="logo-mascot" src="/mobu-race.png" alt="" aria-hidden="true" /></h1>
       <p id="subtitle">Pick a course, then make some waves.</p>
       <fieldset id="raceTypePicker">
-        <legend>Choose your race</legend>
         <div class="race-type-options">
           <label class="race-type-card">
             <input type="radio" name="raceType" value="mobu" checked />
@@ -153,10 +152,10 @@
     <div id="congrats" class="overlay big hidden">
       <canvas id="confetti" class="hidden"></canvas>
       <div id="congratsBox">
-        <div id="congratsTitle">🎉 CONGRATULATIONS 🎉</div>
-        <div id="congratsName">??? wins!</div>
+        <div id="congratsTitle">🏆 Winner 🏆</div>
+        <div id="congratsName">???</div>
+        <button id="backBtn" class="btn-back hidden">🏠 Back to paddock</button>
       </div>
-      <button id="backBtn" class="btn-back hidden">🏠 Back to paddock</button>
       <p id="resultWaiting" class="hidden">Waiting for the host to return to the paddock…</p>
     </div>
 

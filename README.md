@@ -8,8 +8,17 @@ as spectators in a cozy, tree-top-view world.
 
 ```bash
 pnpm install
-pnpm start          # serves on http://localhost:3000
+pnpm start          # serves locally and on the Tailscale interface at port 3000
 ```
+
+For an explicit bind address or a different port:
+
+```bash
+HOST=0.0.0.0 PORT=3000 pnpm start
+```
+
+To bind only the Tailscale interface, set `HOST` to this machine's Tailscale IPv4 address instead of `0.0.0.0`. Then preview from another Tailscale device at `http://<this-machine-tailscale-ip>:3000`
+(or use the machine's Tailscale DNS name). The live multiplayer route is `/live`.
 
 Inspect the reference-based character at http://localhost:3000/mobu-lab.html: turntable,
 smile slider, running and celebration poses, plus a seeded outfit preview.

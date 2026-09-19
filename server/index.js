@@ -402,8 +402,12 @@ if (isMain) {
   app.get(['/live', '/live/'], (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
   const httpServer = http.createServer(app);
   createGameServer(httpServer);
-  const port = process.env.PORT || 3000;
-  httpServer.listen(port, () => {
-    console.log(`Mobu Race server listening on http://localhost:${port}`);
+  const port = Number(process.env.PORT) || 3000;
+  // Bind beyond loopback so the dev server is reachable over Tailscale.
+  // Override HOST when a more restrictive interface is preferred.
+  const host = process.env.HOST || '0.0.0.0';
+  httpServer.listen(port, host, () => {
+    const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+    console.log(`Mobu Race server listening on http://${displayHost}:${port}`);
   });
 }

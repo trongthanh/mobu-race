@@ -34,7 +34,10 @@ const confetti = createConfetti(el.confettiCanvas);
 // height on every viewport, not just narrow screens, so the sidebar never overlaps.
 const panelResizeObserver = new ResizeObserver(() => {
   const cameraHeight = el.camPanel.getBoundingClientRect().height;
-  if (cameraHeight > 0) el.userPanel.style.setProperty('--camera-panel-height', `${cameraHeight}px`);
+  if (cameraHeight > 0) {
+    el.userPanel.style.setProperty('--camera-panel-height', `${cameraHeight}px`);
+    document.documentElement.style.setProperty('--camera-panel-height', `${cameraHeight}px`);
+  }
   const topbarHeight = el.topbar.getBoundingClientRect().height;
   if (topbarHeight > 0) el.spectatorsPanel.style.setProperty('--topbar-height', `${topbarHeight}px`);
 });
@@ -102,6 +105,7 @@ const state = {
   raceStartAt: 0,    // local clock ms (set on race_start)
   leaderId: null,
   winnerId: null,
+  congratsShown: false,
   // Ready-state camera anchors are derived from the server-authoritative grid:
   // Front uses the centre racer in the first row; Chase uses the backmost one.
   cameraTargets: { frontId: null, chaseId: null },
@@ -228,6 +232,7 @@ function handle(msg) {
     case 'reset':
       state.raceState = 'idle';
       state.setup = msg.setup;
+      state.congratsShown = false;
       el.congrats.classList.add('hidden');
       confetti.stop();
       clearRaceScene();
@@ -459,8 +464,10 @@ document.querySelectorAll('#userList').forEach((ul) => {
 camBtns.forEach((b) => b.addEventListener('click', () => setCamMode(b.dataset.cam)));
 
 function refreshSetupUI() {
+  // Offline races have no host/spectator role to announce.
+  el.topbar.classList.toggle('hidden', state.offline);
   el.roleBadge.textContent = state.isHost
-    ? (state.offline ? '👑 Race host' : '👑 You are the Host')
+    ? '👑 You are the Host'
     : `Watching: ${myName()}`;
   const phase = state.raceState; // idle | ready | counting | racing | finished
   const raceOn = phase === 'counting' || phase === 'racing' || phase === 'finished';
@@ -612,6 +619,7 @@ function onRaceCreated(msg) {
   state.plan = null;
   state.winnerId = null;
   state.leaderId = null;
+  state.congratsShown = false;
   el.congrats.classList.add('hidden');
   confetti.stop();
   buildRaceScene(msg);
@@ -692,6 +700,7 @@ function startRace(msg, elapsedOffset = 0) {
   state.raceState = 'racing';
   state.plan = msg.plan;
   state.winnerId = msg.winnerId ?? null;
+  state.congratsShown = false;
   state.leaderId = msg.racers?.[0]?.id ?? null;
   state.raceStartAt = performance.now() - elapsedOffset * 1000;
   for (const r of state.racers) {
@@ -866,15 +875,22 @@ function showCountdown(seconds) {
 }
 
 function showCongrats(msg) {
+  const firstShow = !state.congratsShown;
   state.raceState = 'finished';
-  state.winnerId = msg.winnerId;
-  state.leaderId = msg.winnerId; // lock the camera onto the winner
-  const winner = (msg.results || []).find((r) => r.id === msg.winnerId);
-  el.congratsName.textContent = winner ? `${winner.name} wins! 🏆` : '??? wins! 🏆';
-  el.congrats.classList.remove('hidden');
-  confetti.start();
-  el.timer.textContent = '0.00s';
-  el.countdown.classList.add('hidden');
+  state.winnerId = msg.winnerId ?? state.winnerId;
+  state.leaderId = state.winnerId; // lock the camera onto the winner
+  const winner = (msg.results || []).find((r) => r.id === state.winnerId)
+    || state.racers.find((r) => r.id === state.winnerId);
+  if (firstShow) {
+    state.congratsShown = true;
+    el.congratsName.textContent = winner ? winner.name : 'Unknown winner';
+    el.congrats.classList.remove('hidden');
+    confetti.start();
+    el.timer.textContent = '0.00s';
+    el.countdown.classList.add('hidden');
+  }
+  // The early local trigger keeps the live board; the later server result
+  // replaces it with the authoritative final order once every racer finishes.
   updateLeaderboard(msg.results && msg.results.length ? msg.results : null);
   refreshSetupUI();
 }
@@ -950,9 +966,9 @@ function stableLeaderHeading(leader) {
 
 function updateCamera(dt) {
   const leader = state.racers.find((r) => r.id === state.leaderId) || state.racers[0];
-  // Before the countdown there is no race leader yet. Use the intentional
-  // grid anchors for the two close-up views; once racing starts, both return
-  // to following the live leader as before.
+  // Only the initial race-setup screen presents the finish-line composition.
+  // Once racers are on the line, restore the ready-grid and live-race views.
+  const setupView = state.raceState === 'idle';
   const gridView = state.raceState === 'ready' || state.raceState === 'counting';
   const gridTargetId = camMode === 'front'
     ? state.cameraTargets.frontId
@@ -960,18 +976,43 @@ function updateCamera(dt) {
   const focus = gridView && gridTargetId
     ? state.racers.find((r) => r.id === gridTargetId) || leader
     : leader;
-  const leaderPos = focus ? focus.group.position : _v.set(0, 0, world.track.b);
-  // Ease the focus point toward the selected racer (~0.3s to settle after a swap).
+  const finishCenter = world.lanePoint(0, 0);
+  const focusPos = setupView
+    ? finishCenter
+    : focus ? focus.group.position : finishCenter;
+  const lookY = setupView ? 1.55 : 1.2;
+  // Ease the focus point toward the selected target (~0.3s to settle after a swap).
   if (!camFocusInit) {
-    camFocus.copy(leaderPos);
-    if (focus) camHeading = stableLeaderHeading(focus);
+    camFocus.copy(focusPos);
+    camHeading = setupView ? facingAt(0, 0) : focus ? stableLeaderHeading(focus) : camHeading;
     camFocusInit = true;
   }
-  camFocus.lerp(leaderPos, 1 - Math.exp(-3.5 * dt));
-  if (focus) camHeading = lerpAngle(camHeading, stableLeaderHeading(focus), 1 - Math.exp(-4 * dt));
+  camFocus.lerp(focusPos, 1 - Math.exp(-3.5 * dt));
+  const heading = setupView ? facingAt(0, 0) : focus ? stableLeaderHeading(focus) : camHeading;
+  camHeading = lerpAngle(camHeading, heading, 1 - Math.exp(-4 * dt));
   const t = camFocus;
 
   let az, el, dist;
+  if (setupView && (camMode === 'chase' || camMode === 'front')) {
+    // Use the track tangent explicitly at the line. This keeps both close-up
+    // cameras square to the banner instead of drifting into a side-on pole
+    // view as the selected grid racer changes lanes.
+    const beforeLine = world.lanePoint(-0.003, 0);
+    const afterLine = world.lanePoint(0.003, 0);
+    const tx = afterLine.x - beforeLine.x;
+    const tz = afterLine.z - beforeLine.z;
+    const tangentLen = Math.hypot(tx, tz) || 1;
+    const tangentX = tx / tangentLen;
+    const tangentZ = tz / tangentLen;
+    const setupDist = 14;
+    const direction = camMode === 'chase' ? -1 : 1;
+    const setupX = finishCenter.x + tangentX * setupDist * direction;
+    const setupZ = finishCenter.z + tangentZ * setupDist * direction;
+    const setupHeight = camMode === 'chase' ? 4.8 : 4.6;
+    camera.position.set(setupX, setupHeight, setupZ);
+    camera.lookAt(finishCenter.x, 1.7, finishCenter.z);
+    return;
+  }
   if (camMode === 'chase') {
     // Behind the leader relative to its heading.
     az = camHeading + Math.PI + dragAz;
@@ -988,7 +1029,7 @@ function updateCamera(dt) {
     const aheadPos = world.lanePoint(aheadP, focus?.sepLat ?? 0);
     const height = Math.max(1.5, Math.sin(el) * dist);
     camera.position.set(aheadPos.x + Math.sin(dragAz) * dist, height, aheadPos.z);
-    camera.lookAt(t.x, 1.2, t.z);
+    camera.lookAt(t.x, lookY, t.z);
     return;
   } else if (camMode === 'high') {
     // Cozy top-down-ish view over the leader.
@@ -1008,7 +1049,7 @@ function updateCamera(dt) {
     Math.max(1.5, Math.sin(el) * dist),
     t.z + Math.cos(az) * Math.cos(el) * dist,
   );
-  camera.lookAt(t.x, 1.2, t.z);
+  camera.lookAt(t.x, lookY, t.z);
 }
 
 // ---------- Main loop ----------
@@ -1113,7 +1154,13 @@ function tick(timestamp) {
     // The moment the winner crosses the line, the camera (and the board) lock
     // onto them for good — no more lead swaps after the finish.
     const win = state.winnerId ? state.racers.find((r) => r.id === state.winnerId) : null;
-    if (win && win.finished) leaderId = state.winnerId;
+    if (win && win.finished) {
+      leaderId = state.winnerId;
+      // The client knows the server-selected winner and the shared plan, so
+      // celebrate on the exact crossing frame instead of waiting for the
+      // server's race_finish message after the rest of the field arrives.
+      if (!state.congratsShown) showCongrats({ winnerId: state.winnerId });
+    }
     if (leaderId && leaderId !== state.leaderId) {
       state.leaderId = leaderId;
       updateLeaderboard();
