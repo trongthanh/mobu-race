@@ -431,6 +431,34 @@ body.live-race #joinBtn { margin-top: 2px; }
   text-align: center;
 }
 
+.camera-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.camera-heading .field-label { margin: 0; }
+
+.sound-btn {
+  min-width: 76px;
+  padding: 4px 8px;
+  color: #5a3a1a;
+  background: #fff1ce;
+  border: 2px solid #d9b98a;
+  border-bottom-width: 3px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.15;
+  text-shadow: none;
+}
+
+.sound-btn[aria-pressed="false"] {
+  color: #8a735a;
+  background: #eee7da;
+  border-color: #c7b9a5;
+}
+
 .cam-row { display: flex; gap: 6px; margin-top: 6px; }
 
 .cam-btn {

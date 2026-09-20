@@ -5,6 +5,7 @@ import { createDuck } from './duck.js';
 import { createSurfaceTrail } from './surface.js';
 import { costumeFromSeed, costumeSeedFromText } from './costumes.js';
 import { createConfetti } from './confetti.js';
+import { createRaceAudio } from './audio.js';
 import { buildPlan, randomSlots } from './race-plan.js';
 
 // ---------- DOM ----------
@@ -21,7 +22,7 @@ const el = {
   readyPanel: $('readyPanel'), readyInfo: $('readyInfo'), startBtn: $('startBtn'), cancelBtn: $('cancelBtn'),
   readyWaiting: $('readyWaiting'), readyWaitingInfo: $('readyWaitingInfo'),
   waitingPanel: $('waitingPanel'), setupInfo: $('setupInfo'), waitingRacers: $('waitingRacers'), waitingRacerList: $('waitingRacerList'),
-  camPanel: $('camPanel'),
+  camPanel: $('camPanel'), soundBtn: $('soundBtn'),
   raceHud: $('raceHud'), timer: $('timer'), lbList: $('lbList'), leaderboard: $('leaderboard'),
   countdown: $('countdown'),
   congrats: $('congrats'), congratsName: $('congratsName'), confettiCanvas: $('confetti'),
@@ -29,6 +30,8 @@ const el = {
 };
 const camBtns = [...document.querySelectorAll('.cam-btn')];
 const confetti = createConfetti(el.confettiCanvas);
+const raceAudio = createRaceAudio();
+refreshSoundButton();
 
 // The camera controls can wrap or grow when fonts load. Reserve their actual
 // height on every viewport, not just narrow screens, so the sidebar never overlaps.
@@ -161,6 +164,7 @@ function handle(msg) {
       state.users = msg.users;
       state.raceState = msg.state === 'countdown' ? 'counting' : msg.state;
       state.setup = msg.setup;
+      raceAudio.setPhase(state.raceState, state.setup.raceType);
       rebuildWorld(state.setup.timeSec, state.setup.raceType);
       refreshSetupUI();
       refreshUserList();
@@ -205,6 +209,7 @@ function handle(msg) {
       break;
     case 'countdown':
       state.raceState = 'counting';
+      raceAudio.setPhase('counting', state.setup.raceType);
       refreshSetupUI();
       showCountdown(msg.seconds);
       break;
@@ -235,6 +240,7 @@ function handle(msg) {
       state.congratsShown = false;
       el.congrats.classList.add('hidden');
       confetti.stop();
+      raceAudio.setPhase('idle', state.setup.raceType);
       clearRaceScene();
       rebuildWorld(state.setup.timeSec);
       refreshSetupUI();
@@ -371,6 +377,8 @@ function selectedRaceType() {
 }
 
 function join() {
+  // The join gesture unlocks Web Audio before any countdown or remote event.
+  raceAudio.unlock();
   const name = el.nameInput.value.trim();
   saveVisitorName(name);
   if (!isLiveRace) {
@@ -410,9 +418,29 @@ el.quickGenBtn.addEventListener('click', () => {
   el.namesInput.value = Array.from({ length: n }, (_, i) => String(i + 1).padStart(3, '0')).join('\n');
   sendSetupNow();
 });
-el.startBtn.addEventListener('click', () => send({ type: 'start' }));
+el.startBtn.addEventListener('click', () => {
+  raceAudio.unlock();
+  send({ type: 'start' });
+});
 el.cancelBtn.addEventListener('click', () => send({ type: 'reset' }));
 el.backBtn.addEventListener('click', () => send({ type: 'reset' }));
+el.soundBtn.addEventListener('click', () => {
+  raceAudio.toggle();
+  refreshSoundButton();
+});
+
+function refreshSoundButton() {
+  if (!raceAudio.supported) {
+    el.soundBtn.textContent = '🔇 Unavailable';
+    el.soundBtn.title = 'This browser does not support Web Audio';
+    el.soundBtn.disabled = true;
+    el.soundBtn.setAttribute('aria-pressed', 'false');
+    return;
+  }
+  el.soundBtn.textContent = raceAudio.enabled ? '🔊 Sound' : '🔇 Sound';
+  el.soundBtn.title = raceAudio.enabled ? 'Mute race sounds' : 'Turn on race sounds';
+  el.soundBtn.setAttribute('aria-pressed', String(raceAudio.enabled));
+}
 
 // ---------- setup draft (localStorage) ----------
 const DRAFT_KEY = 'mobu-race:setup-draft';
@@ -616,6 +644,7 @@ const sepPushes = [];
 // racers appear standing at their grid spots behind the start line.
 function onRaceCreated(msg) {
   state.raceState = 'ready';
+  raceAudio.setPhase('ready', msg.raceType ?? state.setup.raceType);
   state.plan = null;
   state.winnerId = null;
   state.leaderId = null;
@@ -703,6 +732,7 @@ function startRace(msg, elapsedOffset = 0) {
   state.congratsShown = false;
   state.leaderId = msg.racers?.[0]?.id ?? null;
   state.raceStartAt = performance.now() - elapsedOffset * 1000;
+  raceAudio.startRace(state.setup.raceType, elapsedOffset);
   for (const r of state.racers) {
     const p0 = Math.min(progressAt(msg.plan[r.id], elapsedOffset), 1);
     r.progress = p0;
@@ -883,6 +913,8 @@ function showCongrats(msg) {
     || state.racers.find((r) => r.id === state.winnerId);
   if (firstShow) {
     state.congratsShown = true;
+    raceAudio.setPhase('finished', state.setup.raceType);
+    raceAudio.celebrate();
     el.congratsName.textContent = winner ? winner.name : 'Unknown winner';
     el.congrats.classList.remove('hidden');
     confetti.start();
@@ -1179,6 +1211,7 @@ function tick(timestamp) {
     el.timer.textContent = `${state.timeSec.toFixed(2)}s`;
   }
 
+  raceAudio.update(state.racers);
   updateCamera(dt);
   renderer.render(scene, camera);
 }
