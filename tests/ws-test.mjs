@@ -292,6 +292,30 @@ async function main() {
   assert.ok(fin2.winnerId === 'r0' || fin2.winnerId === 'r1');
   console.log('STEP 7c: second race finished OK');
 
+  // 8. Duration-specific roster limits apply atomically to setup and create.
+  send(B, { type: 'reset' });
+  await waitFor(B, (m) => m.type === 'reset', 'reset before cap checks', 15000);
+  B.messages.length = 0; // drain B's unobserved setup echo from step 7.
+  for (const [timeSec, maxRacers] of [[10, 12], [20, 24], [30, 50], [60, 100], [90, 100], [120, 100]]) {
+    const names = Array.from({ length: maxRacers + 7 }, (_, i) => `R${i + 1}`);
+    send(B, { type: 'setup', names, timeSec, raceType: 'mobu' });
+    const setup = await waitFor(B,
+      (m) => m.type === 'setup_updated' && m.setup.timeSec === timeSec,
+      `setup cap for ${timeSec}s`);
+    assert.strictEqual(setup.setup.names.length, maxRacers, `${timeSec}s setup cap`);
+    assert.deepStrictEqual(setup.setup.names, names.slice(0, maxRacers), `${timeSec}s retains ordered names`);
+    send(B, { type: 'create' });
+    const created = await waitFor(B,
+      (m) => m.type === 'race_created' && m.timeSec === timeSec,
+      `race_created cap for ${timeSec}s`);
+    assert.strictEqual(created.racers.length, maxRacers, `${timeSec}s create cap`);
+    assert.strictEqual(new Set(created.racers.map((r) => r.id)).size, maxRacers, `${timeSec}s unique racer ids`);
+    assert.ok(created.racers.every((r) => Math.abs(r.slot.lateral) <= 3.3), `${timeSec}s slots stay on track`);
+    send(B, { type: 'reset' });
+    await waitFor(B, (m) => m.type === 'reset', `reset after ${timeSec}s cap check`, 15000);
+  }
+  console.log('STEP 8: duration-specific caps (12/24/50/100) and large grids OK');
+
   // cleanup
   A.close(); B.close(); C.close();
   clearTimeout(GLOBAL_TIMEOUT);

@@ -6,7 +6,7 @@ import { createSurfaceTrail } from './surface.js';
 import { costumeFromSeed, costumeSeedFromText } from './costumes.js';
 import { createConfetti } from './confetti.js';
 import { createRaceAudio } from './audio.js';
-import { buildPlan, randomSlots } from './race-plan.js';
+import { buildPlan, maxRacersForTime, randomSlots } from './race-plan.js';
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -17,19 +17,26 @@ const el = {
   join: $('join'), nameInput: $('nameInput'), joinBtn: $('joinBtn'),
   hud: $('hud'), topbar: $('topbar'), roleBadge: $('roleBadge'),
   userList: $('userList'), spectatorsPanel: $('spectatorsPanel'), userPanel: $('userPanel'), raceControlTitle: $('raceControlTitle'),
-  setupPanel: $('setupPanel'), namesInput: $('namesInput'), syncVisitorsControl: $('syncVisitorsControl'), syncVisitors: $('syncVisitors'), syncedNames: $('syncedNames'), syncedNameList: $('syncedNameList'), timeInput: $('timeInput'), createBtn: $('createBtn'),
+  setupPanel: $('setupPanel'), namesInput: $('namesInput'), nameCount: $('nameCount'), syncVisitorsControl: $('syncVisitorsControl'), syncVisitors: $('syncVisitors'), syncedNames: $('syncedNames'), syncedNameList: $('syncedNameList'), timeInput: $('timeInput'), createBtn: $('createBtn'),
   quickCount: $('quickCount'), quickGenBtn: $('quickGenBtn'),
   readyPanel: $('readyPanel'), readyInfo: $('readyInfo'), startBtn: $('startBtn'), cancelBtn: $('cancelBtn'),
   readyWaiting: $('readyWaiting'), readyWaitingInfo: $('readyWaitingInfo'),
   waitingPanel: $('waitingPanel'), setupInfo: $('setupInfo'), waitingRacers: $('waitingRacers'), waitingRacerList: $('waitingRacerList'),
   camPanel: $('camPanel'), soundBtn: $('soundBtn'),
-  raceHud: $('raceHud'), timer: $('timer'), lbList: $('lbList'), leaderboard: $('leaderboard'),
+  raceHud: $('raceHud'), timer: $('timer'), lbList: $('lbList'), lbExitLayer: $('lbExitLayer'), leaderboard: $('leaderboard'),
   countdown: $('countdown'),
   congrats: $('congrats'), congratsName: $('congratsName'), confettiCanvas: $('confetti'),
   backBtn: $('backBtn'), resultWaiting: $('resultWaiting'),
 };
 const camBtns = [...document.querySelectorAll('.cam-btn')];
 const confetti = createConfetti(el.confettiCanvas);
+const SIMPLE_SHADOW_RACER_COUNT = 20;
+const MOBU_SHADOW_WORLD_Y = 0.056; // track surface is y=0.05
+const simpleShadowMaterial = new THREE.MeshBasicMaterial({
+  color: 0x353535, transparent: true, opacity: 0.42, depthWrite: false,
+  side: THREE.DoubleSide, toneMapped: false,
+});
+simpleShadowMaterial.userData.shared = true;
 const raceAudio = createRaceAudio();
 refreshSoundButton();
 
@@ -109,8 +116,7 @@ const state = {
   leaderId: null,
   winnerId: null,
   congratsShown: false,
-  // Ready-state camera anchors are derived from the server-authoritative grid:
-  // Front uses the centre racer in the first row; Chase uses the backmost one.
+  // Ready-state close cameras share the centred racer in the front row.
   cameraTargets: { frontId: null, chaseId: null },
   watchers: new Map(), // userId -> {group, animate, sprite, spot}
 };
@@ -270,12 +276,46 @@ function clearOfflineTimers() {
   offlineTimers.clear();
 }
 
+const TIME_STEPS = [10, 20, 30, 60, 90, 120];
+
+function snapTimeStep(value, fallback = 30) {
+  const seconds = Math.round(Number(value));
+  if (!Number.isFinite(seconds)) return fallback;
+  return TIME_STEPS.reduce((best, step) =>
+    Math.abs(seconds - step) < Math.abs(seconds - best) ? step : best);
+}
+
+function normalizeRacerNames(rawNames, timeSec) {
+  const limit = maxRacersForTime(timeSec);
+  const names = [];
+  for (const name of Array.isArray(rawNames) ? rawNames : []) {
+    if (typeof name !== 'string') continue;
+    const trimmed = name.trim().slice(0, 20);
+    if (trimmed) names.push(trimmed);
+    if (names.length >= limit) break;
+  }
+  return names;
+}
+
+function inputRacerNames() {
+  return el.namesInput.value.split('\n');
+}
+
+function refreshNameCount(names = normalizeRacerNames(inputRacerNames(), snapTimeStep(el.timeInput.value))) {
+  const timeSec = snapTimeStep(el.timeInput.value);
+  el.nameCount.textContent = `${names.length} / ${maxRacersForTime(timeSec)} racers`;
+}
+
+function syncQuickCountLimit(timeSec) {
+  const limit = maxRacersForTime(timeSec);
+  el.quickCount.max = String(limit);
+  const current = Math.round(Number(el.quickCount.value)) || 2;
+  el.quickCount.value = String(Math.max(2, Math.min(limit, current)));
+}
+
 function offlineSetup(msg) {
-  const names = (Array.isArray(msg.names) ? msg.names : [])
-    .filter((name) => typeof name === 'string' && name.trim())
-    .map((name) => name.trim().slice(0, 20))
-    .slice(0, 12);
-  const timeSec = TIME_STEPS.includes(Number(msg.timeSec)) ? Number(msg.timeSec) : 30;
+  const timeSec = snapTimeStep(msg.timeSec, 30);
+  const names = normalizeRacerNames(msg.names, timeSec);
   const raceType = msg.raceType === 'lake' ? 'lake' : 'mobu';
   return { names, timeSec, raceType };
 }
@@ -347,7 +387,7 @@ function finishOfflineRace() {
     name: r.name,
     finishTime: offlineRace.plan[r.id][offlineRace.plan[r.id].length - 1][0],
     progress: 1,
-  })).sort((a, b) => a.finishTime - b.finishTime);
+  })).sort((a, b) => a.finishTime - b.finishTime || String(a.id).localeCompare(String(b.id)));
   handle({ type: 'race_finish', results, winnerId: offlineRace.winnerId });
 }
 
@@ -405,18 +445,35 @@ function playOffline() {
   });
 }
 
-el.namesInput.addEventListener('input', sendSetup);
+el.namesInput.addEventListener('input', () => {
+  refreshNameCount();
+  sendSetup();
+});
 el.syncVisitors.addEventListener('change', () => sendSetupNow());
-el.timeInput.addEventListener('input', sendSetup);
+el.timeInput.addEventListener('input', () => {
+  const timeSec = snapTimeStep(el.timeInput.value);
+  const names = normalizeRacerNames(inputRacerNames(), timeSec);
+  el.timeInput.value = String(timeSec);
+  // Reducing duration immediately drops excess entries, so a hidden longer
+  // roster cannot reappear if the host later raises the duration again.
+  el.namesInput.value = names.join('\n');
+  syncQuickCountLimit(timeSec);
+  refreshNameCount(names);
+  sendSetupNow(names, timeSec);
+});
 el.createBtn.addEventListener('click', () => {
   sendSetupNow(); // flush the latest field contents (also persists the draft)
   send({ type: 'create' });
 });
 el.quickGenBtn.addEventListener('click', () => {
-  const n = Math.max(2, Math.min(12, Math.round(Number(el.quickCount.value)) || 0));
+  const timeSec = snapTimeStep(el.timeInput.value);
+  const limit = maxRacersForTime(timeSec);
+  const n = Math.max(2, Math.min(limit, Math.round(Number(el.quickCount.value)) || 0));
   el.quickCount.value = n;
-  el.namesInput.value = Array.from({ length: n }, (_, i) => String(i + 1).padStart(3, '0')).join('\n');
-  sendSetupNow();
+  const names = Array.from({ length: n }, (_, i) => String(i + 1).padStart(3, '0'));
+  el.namesInput.value = names.join('\n');
+  refreshNameCount(names);
+  sendSetupNow(names, timeSec);
 });
 el.startBtn.addEventListener('click', () => {
   raceAudio.unlock();
@@ -444,17 +501,13 @@ function refreshSoundButton() {
 
 // ---------- setup draft (localStorage) ----------
 const DRAFT_KEY = 'mobu-race:setup-draft';
-const TIME_STEPS = [10, 20, 30, 60, 90, 120];
 
 function loadDraft() {
   try {
     const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
     if (!raw || !Array.isArray(raw.names)) return { names: [], timeSec: 30, syncVisitors: false };
-    const names = raw.names
-      .filter((n) => typeof n === 'string' && n.trim())
-      .map((n) => n.trim().slice(0, 20))
-      .slice(0, 12);
-    const timeSec = TIME_STEPS.includes(Number(raw.timeSec)) ? Number(raw.timeSec) : 30;
+    const timeSec = snapTimeStep(raw.timeSec, 30);
+    const names = normalizeRacerNames(raw.names, timeSec);
     return { names, timeSec, syncVisitors: Boolean(raw.syncVisitors) };
   } catch {
     return { names: [], timeSec: 30, syncVisitors: false };
@@ -469,10 +522,11 @@ const draft = loadDraft();
 let draftSeeded = false;
 
 function sendSetupNow(names = null, timeSec = null, syncVisitors = null) {
-  const n = names ?? el.namesInput.value.split('\n').map((s) => s.trim()).filter(Boolean);
-  const t = timeSec ?? (Number(el.timeInput.value) || 30);
+  const t = snapTimeStep(timeSec ?? el.timeInput.value, 30);
+  const n = normalizeRacerNames(names ?? inputRacerNames(), t);
   const sync = syncVisitors ?? el.syncVisitors.checked;
   saveDraft(n, t, sync);
+  refreshNameCount(n);
   send({ type: 'setup', names: n, syncVisitors: sync, timeSec: t, raceType: state.setup.raceType });
 }
 
@@ -535,6 +589,7 @@ function refreshSetupUI() {
     if (document.activeElement !== el.namesInput) el.namesInput.value = manualNames.join('\n');
     el.syncVisitors.checked = Boolean(state.setup.syncVisitors);
     el.timeInput.value = state.setup.timeSec;
+    syncQuickCountLimit(state.setup.timeSec);
     el.syncedNames.classList.toggle('hidden', !state.setup.syncVisitors);
     el.syncedNameList.innerHTML = '';
     for (const name of state.setup.syncedNames || []) {
@@ -544,6 +599,7 @@ function refreshSetupUI() {
     }
   }
   const n = state.setup.names.length;
+  refreshNameCount(state.setup.names);
   const plural = n === 1 ? '' : 's';
   const course = state.setup.raceType === 'lake' ? '🦆 Lake Duck Derby' : '🏁 Countryside Mobu Dash';
   el.setupInfo.textContent = `${n} racer${plural} signed up · ${state.setup.timeSec}s · ${course}`;
@@ -658,13 +714,44 @@ function onRaceCreated(msg) {
   refreshSetupUI();
 }
 
+function makeSimpleGroundShadow(group, raceType) {
+  // Per-racer geometry is intentionally disposable with the character rig;
+  // the shared transparent material keeps a large field inexpensive.
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 20), simpleShadowMaterial);
+  shadow.name = 'simple-ground-shadow';
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.renderOrder = 1;
+  shadow.castShadow = false;
+  shadow.receiveShadow = false;
+  // Duck groups are scaled as a whole, so compensate to keep the water shadow
+  // close to the same visible footprint as a Mobu's dirt shadow.
+  shadow.scale.set(raceType === 'lake' ? 1.35 : 0.9, raceType === 'lake' ? 0.72 : 0.45, 1);
+  // Ducks scale their outer group, so convert the desired 0.332m lift from
+  // the group's origin (waterline + 0.012m) into local coordinates.
+  shadow.position.y = raceType === 'lake' ? 0.332 / group.scale.y : MOBU_SHADOW_WORLD_Y - group.position.y;
+  group.add(shadow);
+  return shadow;
+}
+
+function syncSimpleGroundShadow(racer) {
+  if (!racer.simpleShadow) return;
+  // Mobus hop above the raised dirt track, but their shadow stays just above
+  // its y=0.05 surface. Ducks place their outer group 0.32m below waterline,
+  // so account for scale to put the ellipse 0.012m above the waves.
+  racer.simpleShadow.position.y = racer.raceType === 'lake'
+    ? 0.332 / racer.group.scale.y
+    : MOBU_SHADOW_WORLD_Y - racer.group.position.y;
+}
+
 function buildRaceScene(msg) {
   clearRaceScene();
   const raceType = msg.raceType ?? state.setup.raceType;
+  const useSimpleShadows = msg.racers.length >= SIMPLE_SHADOW_RACER_COUNT;
   state.setup.raceType = raceType;
   state.setup.timeSec = msg.timeSec;
   rebuildWorld(msg.timeSec, raceType);
-  camFocusInit = false; // re-aim the camera at the new pack without gliding
+  camFocusInit = false;
+  camFocusTargetId = null; // re-aim the camera at the new pack without gliding
   state.timeSec = msg.timeSec;
   for (const r of msg.racers) {
     // Every racer gets one server seed. On land it chooses a mobu wardrobe;
@@ -675,6 +762,11 @@ function buildRaceScene(msg) {
     const character = raceType === 'lake' ? createDuck({ seed }) : createMobu();
     if (raceType !== 'lake') character.setCostume(costumeFromSeed(seed));
     const { group, animate } = character;
+    if (useSimpleShadows) {
+      group.traverse((o) => {
+        if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; }
+      });
+    }
     const sprite = makeNameSprite(r.name, { height: 0.45 });
     sprite.position.y = raceType === 'lake' ? 2.3 : MOBU_SPRITE_Y + 0.25;
     group.add(sprite);
@@ -687,7 +779,8 @@ function buildRaceScene(msg) {
     state.racers.push({
       ...r, group, animate, setHeading: character.setHeading,
       setCelebrating: character.setCelebrating,
-      lateral, startFrac,
+      lateral, startFrac, raceType,
+      simpleShadow: useSimpleShadows ? makeSimpleGroundShadow(group, raceType) : null,
       sepLat: lateral, lateralVelocity: 0,
       phase: (seed >>> 0) / 4294967296 * Math.PI * 2,
       trail: createSurfaceTrail(scene, raceType === 'lake', seed),
@@ -696,9 +789,9 @@ function buildRaceScene(msg) {
     });
   }
 
-  // The first five slots form the close front row. Pick its central racer for
-  // Front, and the furthest-back starting slot for Chase, rather than relying
-  // on roster order (which made both ready-state views feel random).
+  // The first five slots form the front row. Pick its central racer rather
+  // than relying on roster order, which made ready-state close cameras feel
+  // random and occasionally frame a banner pole.
   const byBehind = state.racers.slice().sort((a, b) => {
     const aBehind = Number.isFinite(a.slot?.behind) ? a.slot.behind : 1;
     const bBehind = Number.isFinite(b.slot?.behind) ? b.slot.behind : 1;
@@ -710,16 +803,17 @@ function buildRaceScene(msg) {
     Math.abs(a.lateral) - Math.abs(b.lateral) ||
     (a.slot?.behind ?? 1) - (b.slot?.behind ?? 1) ||
     String(a.id).localeCompare(String(b.id)))[0];
-  const lastLine = byBehind[byBehind.length - 1];
   state.cameraTargets = {
     frontId: frontMiddle?.id ?? null,
-    chaseId: lastLine?.id ?? null,
+    chaseId: frontMiddle?.id ?? null,
   };
 }
 
 // Plan progress 0 is the start line; racers begin `behind` meters before it.
 function startFraction(behindMeters) {
-  return Math.min(0.04, behindMeters / world.track.length);
+  // A 100-racer grid can extend ~31m behind the stripe; preserve that depth
+  // instead of compressing it into the old 4%-of-a-lap staging segment.
+  return Math.min(0.22, behindMeters / world.track.length);
 }
 
 function startRace(msg, elapsedOffset = 0) {
@@ -739,15 +833,47 @@ function startRace(msg, elapsedOffset = 0) {
     r.finished = p0 >= 1;
     r.finishElapsed = r.finished ? msg.plan[r.id][msg.plan[r.id].length - 1][0] : null;
   }
-  // Park spots past the line in leaderboard order: the winner coasts the
-  // farthest down the straight, each next finisher stops a step closer to the
-  // line, so the parked field reads front-to-back just like the results board
-  // instead of merging into one blob.
+  // Park finishers in a four-wide results grid rather than capping their
+  // forward distance. A cap made every racer below rank 12 share the winner's
+  // line in larger fields. The winner remains in the front-most, centre slot;
+  // each lower row parks closer to the finish stripe.
   const byFinish = state.racers.slice().sort((a, b) =>
-    msg.plan[a.id][msg.plan[a.id].length - 1][0] - msg.plan[b.id][msg.plan[b.id].length - 1][0]);
-  const lastIdx = byFinish.length - 1;
+    msg.plan[a.id][msg.plan[a.id].length - 1][0] - msg.plan[b.id][msg.plan[b.id].length - 1][0]
+      || String(a.id).localeCompare(String(b.id)));
+  const resultsCount = Math.max(0, byFinish.length - 1);
+  // Small fields preserve their own lanes. As the field grows, add columns
+  // only when needed while keeping enough lateral and forward clearance for
+  // the Mobu silhouette.
+  const preserveFinishLanes = resultsCount <= 5;
+  const parkingLayout = preserveFinishLanes
+    ? { columns: 1, columnGap: 0, rowGap: 3.1 }
+    : resultsCount <= 17
+    ? { columns: 2, columnGap: 4.8, rowGap: 2.8 }
+    : resultsCount <= 49
+    ? { columns: 3, columnGap: 3, rowGap: 2.5 }
+    : { columns: 4, columnGap: 2, rowGap: 2.15 };
+  const { columns: parkColumns, columnGap, rowGap } = parkingLayout;
+  const lastResultsRow = Math.floor(Math.max(0, resultsCount - 1) / parkColumns);
+  const firstResultsRowMeters = 1 + rowGap * lastResultsRow;
   byFinish.forEach((r, idx) => {
-    r.coastMeters = 1 + 1.5 * (lastIdx - idx);
+    if (idx === 0) {
+      // The winner gets a dedicated lead spot: they can celebrate clearly in
+      // front of the pack instead of sharing the first results row.
+      r.parkLateral = 0;
+      // Lead by one clear parking row, not an exaggerated parade distance.
+      r.coastMeters = firstResultsRowMeters + rowGap;
+    } else {
+      const resultsIndex = idx - 1;
+      const row = Math.floor(resultsIndex / parkColumns);
+      const col = resultsIndex % parkColumns;
+      const racersInRow = Math.min(parkColumns, resultsCount - row * parkColumns);
+      // Small fields retain each racer's existing lane after the stripe.
+      // Larger fields centre partial results rows to use the available width.
+      r.parkLateral = preserveFinishLanes
+        ? r.lateral
+        : (col - (racersInRow - 1) / 2) * columnGap;
+      r.coastMeters = 1 + rowGap * (lastResultsRow - row);
+    }
     // The coast starts at the racer's own cross-line pace (their plan's last
     // segment) and decays linearly to zero on the park spot: sprint through
     // the line, then bleed speed all the way to the stop with no pop. With
@@ -757,7 +883,7 @@ function startRace(msg, elapsedOffset = 0) {
     const [t0, p0] = kfs[kfs.length - 2];
     const pace = Math.max(0.5,
       ((p1 - p0) / Math.max(0.001, t1 - t0)) * (1 + r.startFrac) * world.track.length);
-    r.coastDur = Math.min(8, (2 * r.coastMeters) / pace);
+    r.coastDur = Math.min(10, (2 * r.coastMeters) / pace);
     r.coastFrac = r.coastMeters / world.track.length;
   });
   // A winner already past the line (late joiner opening a finished race)
@@ -786,8 +912,7 @@ function clearRaceScene() {
   state.leaderId = null;
   state.winnerId = null;
   state.cameraTargets = { frontId: null, chaseId: null };
-  lbRows.clear();
-  el.lbList.innerHTML = '';
+  clearLeaderboardRows();
   el.raceHud.classList.add('hidden');
   el.countdown.classList.add('hidden');
 }
@@ -816,11 +941,55 @@ function facingAt(progress, lateral = 0) {
   return Math.atan2(ahead.x - here.x, ahead.z - here.z);
 }
 
-// Leaderboard rows are keyed by racer id and kept across updates, so an order
-// change can animate: each row slides from its old slot to the new one (FLIP:
-// measure old tops, re-order, tween the inverted delta back to zero).
-const lbRows = new Map(); // racerId -> <li>
+// Keep rendering/layout work bounded even for a 100-racer field. The board
+// owns only its twelve visible rows; incoming/outgoing rows briefly animate in
+// a separate overlay and never participate in the FLIP pass.
+const LEADERBOARD_LIMIT = 12;
+const lbRows = new Map(); // active or exiting racerId -> <li>
+const lbExitTimers = new Map();
 let lbNextRefresh = 0;    // race-elapsed second for the next periodic refresh
+
+function clearLeaderboardRows() {
+  for (const timer of lbExitTimers.values()) clearTimeout(timer);
+  lbExitTimers.clear();
+  lbRows.clear();
+  el.lbList.replaceChildren();
+  el.lbExitLayer.replaceChildren();
+}
+
+function restoreBoardRow(li) {
+  const timer = lbExitTimers.get(li.dataset.id);
+  if (timer) clearTimeout(timer);
+  lbExitTimers.delete(li.dataset.id);
+  li.classList.remove('lb-exit', 'lb-exiting');
+  li.style.position = '';
+  li.style.top = '';
+  li.style.left = '';
+  li.style.width = '';
+  li.style.opacity = '';
+  li.style.transform = '';
+  li.style.transition = '';
+}
+
+function retireBoardRow(li) {
+  const id = li.dataset.id;
+  const boardRect = el.leaderboard.getBoundingClientRect();
+  const rect = li.getBoundingClientRect();
+  li.classList.remove('lb-enter');
+  li.classList.add('lb-exit');
+  li.style.position = 'absolute';
+  li.style.top = `${rect.top - boardRect.top}px`;
+  li.style.left = `${rect.left - boardRect.left}px`;
+  li.style.width = `${rect.width}px`;
+  li.style.transition = 'opacity 180ms ease, transform 180ms ease';
+  el.lbExitLayer.appendChild(li);
+  requestAnimationFrame(() => li.classList.add('lb-exiting'));
+  lbExitTimers.set(id, setTimeout(() => {
+    if (li.parentNode === el.lbExitLayer) li.remove();
+    lbExitTimers.delete(id);
+    if (lbRows.get(id) === li) lbRows.delete(id);
+  }, 220));
+}
 
 // A finisher's arrival time straight from the plan — the exact value the
 // server ranks the final results by.
@@ -830,58 +999,53 @@ function planFinishTime(r) {
 }
 
 function updateLeaderboard(finalResults = null) {
-  let rows;
+  let standings;
   if (finalResults && finalResults.length) {
-    // Final standings from the server: the leaderboard doubles as the results
-    // board once the race is over.
-    rows = finalResults.map((res) => ({ ...res, finished: res.finishTime != null }));
+    standings = finalResults.map((res) => ({ ...res, finished: res.finishTime != null }));
   } else {
-    // Finishers lock into arrival order while the still-running field keeps
-    // ranking by live progress. (progress clamps at 1, so a plain sort leaves
-    // the finished pack tied in array order — rescrambling every time someone
-    // crosses — and then jumps to the server's order when race_finish lands.)
-    rows = state.racers.slice().sort((a, b) => {
+    standings = state.racers.slice().sort((a, b) => {
       const fa = a.finished ? planFinishTime(a) : Infinity;
       const fb = b.finished ? planFinishTime(b) : Infinity;
       if (fa !== fb) return fa - fb;
-      return b.progress - a.progress;
+      if (b.progress !== a.progress) return b.progress - a.progress;
+      return String(a.id).localeCompare(String(b.id));
     });
   }
+  const rows = standings.slice(0, LEADERBOARD_LIMIT);
+  const nextIds = new Set(rows.map((r) => r.id));
 
-  // FIRST: where every row sits right now (rect includes any in-flight slide,
-  // so an update that interrupts one re-anchors it without a jump).
-  const before = new Map();
-  for (const li of el.lbList.children) {
-    before.set(li.dataset.id, li.getBoundingClientRect().top);
-  }
+  // Only current board rows are measured and FLIP-animated. Rows falling out
+  // retire in the overlay, while new top-12 entrants fade in without forcing
+  // layout work for the rest of the field.
+  const activeRows = [...el.lbList.children];
+  const before = new Map(activeRows.map((li) => [li.dataset.id, li.getBoundingClientRect().top]));
+  for (const li of activeRows) if (!nextIds.has(li.dataset.id)) retireBoardRow(li);
 
-  // THEN: rewrite the board in the new order. appendChild moves existing rows,
-  // so :first-child styling follows the gold spot automatically.
-  el.lbList.innerHTML = '';
-  rows.forEach((r, i) => {
+  const fragment = document.createDocumentFragment();
+  const entering = [];
+  rows.forEach((r, rank) => {
     let li = lbRows.get(r.id);
+    const isNew = !li || li.parentNode === el.lbExitLayer;
     if (!li) {
       li = document.createElement('li');
       li.dataset.id = r.id;
       lbRows.set(r.id, li);
+    } else {
+      restoreBoardRow(li);
     }
     const finishT = r.finishTime ?? (r.finished ? planFinishTime(r) : null);
-    // Do not reveal the preselected winner until they actually cross the line.
-    // The winner finishes at duration; negative values are time behind them.
     const won = r.finished && r.id === state.winnerId;
     const time = finishT == null || won ? '' : ` −${Math.max(0, finishT - state.timeSec).toFixed(2)}s`;
     const marks = won ? ' 🥇' :
       (!r.finished && r.id === state.leaderId && state.raceState === 'racing' ? ' 🏃' : '');
-    li.textContent = `${i + 1}. ${r.name}${time}${marks}`;
+    li.textContent = `${rank + 1}. ${r.name}${time}${marks}`;
     li.title = won ? 'Winner' : finishT == null ? '' :
       `${Math.max(0, finishT - state.timeSec).toFixed(2)} seconds behind the winner`;
-    el.lbList.appendChild(li);
+    if (isNew) entering.push(li);
+    fragment.appendChild(li);
   });
-  for (const [id, li] of lbRows) {
-    if (!li.isConnected) lbRows.delete(id);
-  }
+  el.lbList.appendChild(fragment);
 
-  // INVERT + PLAY: start each moved row at its old offset and let it ease in.
   for (const li of el.lbList.children) {
     const prevTop = before.get(li.dataset.id);
     if (prevTop === undefined) continue;
@@ -889,9 +1053,13 @@ function updateLeaderboard(finalResults = null) {
     if (Math.abs(delta) < 1) continue;
     li.style.transition = 'none';
     li.style.transform = `translateY(${delta}px)`;
-    li.getBoundingClientRect(); // flush so the slide starts from the old spot
+    li.getBoundingClientRect();
     li.style.transition = 'transform 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.08)';
     li.style.transform = '';
+  }
+  for (const li of entering) {
+    li.classList.add('lb-enter');
+    requestAnimationFrame(() => li.classList.remove('lb-enter'));
   }
 }
 
@@ -941,14 +1109,20 @@ let lastPointer = null;
 // Smoothed follow state so the camera glides when the lead changes hands
 // instead of snapping to the new leader.
 const camFocus = new THREE.Vector3();
+const camFocusOffset = new THREE.Vector3();
 let camFocusInit = false;
+let camFocusTargetId = null;
 let camHeading = Math.PI;
+let camHeadingOffset = 0;
 
 function setCamMode(mode) {
   camMode = mode;
   dragAz = 0;
   dragEl = 0;
   zoom = 1;
+  // A deliberate mode change frames the selected target immediately;
+  // racer-to-racer changes within that mode still use the damped path below.
+  camFocusInit = false;
   camBtns.forEach((b) => b.classList.toggle('active', b.dataset.cam === mode));
 }
 
@@ -978,11 +1152,11 @@ renderer.domElement.addEventListener('wheel', (e) => {
   }
 }, { passive: true });
 
-function lerpAngle(a, b, t) {
-  let d = (b - a) % (Math.PI * 2);
+function angleDelta(a, b) {
+  let d = (a - b) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2;
   if (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+  return d;
 }
 
 // The leader's direction of travel, stripped of the wobble that animate()
@@ -1014,15 +1188,34 @@ function updateCamera(dt) {
     : focus ? focus.group.position : finishCenter;
   const lookY = setupView ? 1.55 : 1.2;
   // Ease the focus point toward the selected target (~0.3s to settle after a swap).
+  const heading = setupView ? facingAt(0, 0) : focus ? stableLeaderHeading(focus) : camHeading;
+  const focusTargetId = setupView ? 'setup' : focus?.id ?? null;
   if (!camFocusInit) {
     camFocus.copy(focusPos);
-    camHeading = setupView ? facingAt(0, 0) : focus ? stableLeaderHeading(focus) : camHeading;
+    camFocusOffset.set(0, 0, 0);
+    camHeading = heading;
+    camHeadingOffset = 0;
+    camFocusTargetId = focusTargetId;
     camFocusInit = true;
+  } else if (focusTargetId !== camFocusTargetId) {
+    // Preserve the current view at the instant a leader changes, then decay
+    // only that handoff offset. Once acquired, the camera moves at the new
+    // racer's exact speed and keeps its intended Chase/Front distance.
+    camFocusOffset.copy(camFocus).sub(focusPos);
+    camHeadingOffset = angleDelta(camHeading, heading);
+    camFocusTargetId = focusTargetId;
   }
-  camFocus.lerp(focusPos, 1 - Math.exp(-3.5 * dt));
-  const heading = setupView ? facingAt(0, 0) : focus ? stableLeaderHeading(focus) : camHeading;
-  camHeading = lerpAngle(camHeading, heading, 1 - Math.exp(-4 * dt));
+  const handoffDecay = Math.exp(-3.1 * dt);
+  camFocusOffset.multiplyScalar(handoffDecay);
+  camFocus.copy(focusPos).add(camFocusOffset);
+  camHeadingOffset *= handoffDecay;
+  camHeading = heading + camHeadingOffset;
   const t = camFocus;
+
+  function placeCamera(desired, lookAtY = lookY) {
+    camera.position.copy(desired);
+    camera.lookAt(t.x, lookAtY, t.z);
+  }
 
   let az, el, dist;
   if (setupView && (camMode === 'chase' || camMode === 'front')) {
@@ -1051,18 +1244,12 @@ function updateCamera(dt) {
     el = 0.5 + dragEl;
     dist = 10.3 * zoom;
   } else if (camMode === 'front') {
-    // Place camera on the track ahead of the leader, looking back along the
-    // track so the finish line stripe and banner run horizontally across the
-    // view with the racers visible beyond.
+    // In front of the leader, looking back along the stable track tangent.
+    // It shares the handoff-smoothed focus below, so its distance remains
+    // fixed while following a racer and only pans during a leader change.
+    az = camHeading + dragAz;
     el = 0.42 + dragEl;
     dist = 11 * zoom;
-    const progress = focus ? (focus.dispP ?? -focus.startFrac) : 0;
-    const aheadP = progress + Math.cos(el) * dist / world.track.length;
-    const aheadPos = world.lanePoint(aheadP, focus?.sepLat ?? 0);
-    const height = Math.max(1.5, Math.sin(el) * dist);
-    camera.position.set(aheadPos.x + Math.sin(dragAz) * dist, height, aheadPos.z);
-    camera.lookAt(t.x, lookY, t.z);
-    return;
   } else if (camMode === 'high') {
     // Cozy top-down-ish view over the leader.
     az = dragAz;
@@ -1076,12 +1263,11 @@ function updateCamera(dt) {
   }
   el = Math.min(1.45, Math.max(0.08, el));
 
-  camera.position.set(
+  placeCamera(new THREE.Vector3(
     t.x + Math.sin(az) * Math.cos(el) * dist,
     Math.max(1.5, Math.sin(el) * dist),
     t.z + Math.cos(az) * Math.cos(el) * dist,
-  );
-  camera.lookAt(t.x, lookY, t.z);
+  ));
 }
 
 // ---------- Main loop ----------
@@ -1168,7 +1354,8 @@ function tick(timestamp) {
       const step = Math.min(dt, 0.05);
       // Separation is part of the shared race presentation, not a duck-vs-mobu
       // rule. Both skins use the same lateral response and track boundaries.
-      const desiredVelocity = THREE.MathUtils.clamp((r.lateral - r.sepLat) * 0.6 + sepPushes[i] * 4, -1.2, 1.2);
+      const targetLateral = r.finished && Number.isFinite(r.parkLateral) ? r.parkLateral : r.lateral;
+      const desiredVelocity = THREE.MathUtils.clamp((targetLateral - r.sepLat) * 0.6 + sepPushes[i] * 4, -1.2, 1.2);
       r.lateralVelocity += (desiredVelocity - r.lateralVelocity) * (1 - Math.exp(-7 * step));
       r.sepLat = THREE.MathUtils.clamp(r.sepLat + r.lateralVelocity * step, -BAND_MAX, BAND_MAX);
       const pos = world.lanePoint(r.dispP, r.sepLat);
@@ -1181,6 +1368,7 @@ function tick(timestamp) {
       r.setHeading(heading + Math.atan2(r.lateralVelocity, Math.max(1, r.pace)) * 0.65);
       // Pose LAST: the old separation pass erased buoyancy and running bounce.
       r.animate(surfaceTime, r.pace / 7, r.motion);
+      syncSimpleGroundShadow(r);
       r.trail.update(surfaceTime, pos, heading, r.pace, r.motion.distance * 5 + r.phase);
     }
     // The moment the winner crosses the line, the camera (and the board) lock
@@ -1207,7 +1395,10 @@ function tick(timestamp) {
     }
   } else {
     // Paddock / on the line: spawned racers idle in place behind the start line.
-    for (const r of state.racers) r.animate(now, 0);
+    for (const r of state.racers) {
+      r.animate(now, 0);
+      syncSimpleGroundShadow(r);
+    }
     el.timer.textContent = `${state.timeSec.toFixed(2)}s`;
   }
 

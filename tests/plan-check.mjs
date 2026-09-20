@@ -19,7 +19,17 @@ function progressAt(keyframes, t) {
 }
 
 // Pull buildPlan out of the server module (exported for verification).
-const { buildPlan } = await import(new URL('../server/index.js', import.meta.url).href);
+const { buildPlan, maxRacersForTime, randomSlots } = await import(new URL('../server/index.js', import.meta.url).href);
+
+for (const [timeSec, maxRacers] of [[10, 12], [20, 24], [30, 50], [60, 100], [90, 100], [120, 100]]) {
+  assert.strictEqual(maxRacersForTime(timeSec), maxRacers, `duration cap for ${timeSec}s`);
+  const slots = randomSlots(maxRacers);
+  assert.strictEqual(slots.length, maxRacers, `grid size for ${timeSec}s`);
+  assert.ok(slots.every((slot) => Number.isFinite(slot.behind) && Math.abs(slot.lateral) <= 3.3),
+    `grid stays finite and on track for ${timeSec}s`);
+  assert.strictEqual(slots[0].behind, 0.75, 'front row stays at the line');
+  assert.ok(slots.at(-1).behind > 5 || maxRacers <= 12, 'large grids extend backward');
+}
 
 let failures = 0;
 function check(cond, label) {

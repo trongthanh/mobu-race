@@ -79,7 +79,10 @@
               Add spectators as racers
             </label>
           </div>
-          <label for="namesInput">Racer names</label>
+          <div class="racer-names-heading">
+            <label for="namesInput">Racer names</label>
+            <span id="nameCount" aria-live="polite">0 / 50 racers</span>
+          </div>
           <div id="racerNamesBox">
             <div id="syncedNames" class="hidden" aria-live="polite">
               <ul id="syncedNameList"></ul>
@@ -88,7 +91,7 @@
           </div>
           <label for="quickCount">Generate numbered racers</label>
           <div class="quick-row">
-            <input id="quickCount" type="number" min="2" max="12" value="8" inputmode="numeric" aria-label="Number of racers" />
+            <input id="quickCount" type="number" min="2" max="50" value="8" inputmode="numeric" aria-label="Number of racers" />
             <button id="quickGenBtn" class="btn-secondary">Generate</button>
           </div>
           <label for="timeInput">Race seconds (track length)</label>
@@ -143,6 +146,7 @@
         <div id="leaderboard" class="panel small">
           <h3>Leaderboard</h3>
           <ol id="lbList"></ol>
+          <div id="lbExitLayer" aria-hidden="true"></div>
         </div>
       </div>
 

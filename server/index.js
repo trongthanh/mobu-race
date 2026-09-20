@@ -4,11 +4,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import crypto from 'node:crypto';
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { buildPlan, randomSlots } from '../public/js/race-plan.js';
+import { buildPlan, maxRacersForTime, randomSlots } from '../public/js/race-plan.js';
 
 // Keep the server export stable for tests and downstream callers while sharing
 // the exact plan/grid implementation with the browser and Cloudflare worker.
-export { buildPlan, randomSlots };
+export { buildPlan, maxRacersForTime, randomSlots };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,15 +37,16 @@ function snapTimeStep(v, dflt = 30) {
 }
 
 function sanitizeSetup(payload) {
+  const timeSec = snapTimeStep(payload?.timeSec, 30);
+  const limit = maxRacersForTime(timeSec);
   const namesRaw = Array.isArray(payload?.names) ? payload.names : [];
   const manualNames = [];
   for (const n of namesRaw) {
     if (typeof n !== 'string') continue;
     const s = n.trim().slice(0, 20);
     if (s) manualNames.push(s);
-    if (manualNames.length >= 12) break;
+    if (manualNames.length >= limit) break;
   }
-  const timeSec = snapTimeStep(payload?.timeSec, 30);
   const raceType = RACE_TYPES.has(payload?.raceType) ? payload.raceType : 'mobu';
   return { manualNames, syncVisitors: Boolean(payload?.syncVisitors), timeSec, raceType };
 }
@@ -97,14 +98,15 @@ export function createGameServer(httpServer) {
   // Visitor names are server-derived so every client gets the same roster and
   // a reconnect, rename, or host transfer cannot leave stale racer names behind.
   function setupSnapshot() {
+    const limit = maxRacersForTime(setup.timeSec);
     const syncedNames = setup.syncVisitors
-      ? [...users.values()].filter((u) => !u.isHost).sort((a, b) => a.index - b.index).map((u) => u.name)
+      ? [...users.values()].filter((u) => !u.isHost).sort((a, b) => a.index - b.index).map((u) => u.name).slice(0, limit)
       : [];
-    const names = syncedNames.concat(setup.manualNames).slice(0, 12);
+    const names = syncedNames.concat(setup.manualNames).slice(0, limit);
     return {
       names,
-      manualNames: setup.manualNames,
-      syncedNames: syncedNames.slice(0, 12),
+      manualNames: setup.manualNames.slice(0, limit),
+      syncedNames,
       syncVisitors: setup.syncVisitors,
       timeSec: setup.timeSec,
       raceType: setup.raceType,
@@ -216,7 +218,8 @@ export function createGameServer(httpServer) {
       const fa = a.finishTime === null ? Infinity : a.finishTime;
       const fb = b.finishTime === null ? Infinity : b.finishTime;
       if (fa !== fb) return fa - fb;
-      return b.progress - a.progress;
+      if (b.progress !== a.progress) return b.progress - a.progress;
+      return String(a.id).localeCompare(String(b.id));
     });
     broadcast({ type: 'race_finish', results, winnerId: race.winnerId });
     race.lastResults = results;

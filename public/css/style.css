@@ -415,6 +415,22 @@ body.live-race #joinBtn { margin-top: 2px; }
 
 #waitingRacers .field-label { margin: 0 0 3px; }
 
+.racer-names-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.racer-names-heading label { margin: 0; }
+
+#nameCount {
+  color: #8a735a;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 #waitingRacerList {
   max-height: 105px;
   padding-left: 22px;
@@ -502,6 +518,7 @@ body.live-race #joinBtn { margin-top: 2px; }
 }
 
 #lbList {
+  position: relative;
   list-style: none;
 }
 
@@ -513,8 +530,17 @@ body.live-race #joinBtn { margin-top: 2px; }
   padding: 3px 6px;
   border-radius: 8px;
   /* gold :first-child highlight eases off/on as rows slide past each other */
-  transition: background-color 0.35s ease;
+  transition: background-color 0.35s ease, opacity 180ms ease, transform 180ms ease;
 }
+
+#lbExitLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#lbList li.lb-enter { opacity: 0; transform: translateY(7px); }
+#lbExitLayer li.lb-exiting { opacity: 0; transform: translateX(-10px); }
 
 /* First place gets gold */
 #lbList li:first-child {

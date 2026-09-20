@@ -1,9 +1,9 @@
 // Cloudflare Worker + Durable Object realtime backend for Mobu Race.
-import { buildPlan, randomSlots } from '../public/js/race-plan.js';
+import { buildPlan, maxRacersForTime, randomSlots } from '../public/js/race-plan.js';
 
 // The worker and local server intentionally share the same plan/grid module;
 // race type is presentation-only and never changes authoritative mechanics.
-export { buildPlan, randomSlots };
+export { buildPlan, maxRacersForTime, randomSlots };
 
 function sanitizeName(raw, fallback) {
   if (typeof raw !== 'string') return fallback;
@@ -23,15 +23,16 @@ function snapTimeStep(v, dflt = 30) {
 }
 
 function sanitizeSetup(payload) {
+  const timeSec = snapTimeStep(payload?.timeSec, 30);
+  const limit = maxRacersForTime(timeSec);
   const namesRaw = Array.isArray(payload?.names) ? payload.names : [];
   const names = [];
   for (const n of namesRaw) {
     if (typeof n !== 'string') continue;
     const s = n.trim().slice(0, 20);
     if (s) names.push(s);
-    if (names.length >= 12) break;
+    if (names.length >= limit) break;
   }
-  const timeSec = snapTimeStep(payload?.timeSec, 30);
   const raceType = RACE_TYPES.has(payload?.raceType) ? payload.raceType : 'mobu';
   return { names, timeSec, raceType };
 }
@@ -175,7 +176,9 @@ export class RaceRoom {
     }).sort((a, b) => {
       const aTime = a.finishTime ?? Infinity;
       const bTime = b.finishTime ?? Infinity;
-      return aTime === bTime ? b.progress - a.progress : aTime - bTime;
+      if (aTime !== bTime) return aTime - bTime;
+      if (b.progress !== a.progress) return b.progress - a.progress;
+      return String(a.id).localeCompare(String(b.id));
     });
     this.race.lastResults = results;
     this.broadcast({ type: 'race_finish', results, winnerId: this.race.winnerId });

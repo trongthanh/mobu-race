@@ -7,6 +7,16 @@ function smoothstep(x) {
   return c * c * (3 - 2 * c);
 }
 
+// Longer courses have enough track and elapsed time to make larger fields
+// legible. This shared policy keeps offline, Node, and Worker races aligned.
+export function maxRacersForTime(timeSec) {
+  const seconds = Number(timeSec);
+  if (seconds <= 10) return 12;
+  if (seconds <= 20) return 24;
+  if (seconds <= 30) return 50;
+  return 100;
+}
+
 // Build race plan with pack pacing: the winner is decided up front, then every
 // racer is paced off the SAME baseline so the pack runs close together and
 // temporary leads read as real racing, not standing around waiting to be passed.
@@ -165,47 +175,27 @@ export function buildPlan(names, timeSec) {
   return { plan, winnerIdx };
 }
 
-// Put a small front row close to the start line, then spread the rest behind
-// it. With big fields, spreading racers across lanes would push them off the
-// dirt, so everyone stays inside the lane band (±3.3 of the 4.4 half-band)
-// instead of getting a fixed lane slot.
+// Five-wide, deterministic staging rows stay inside the lane band while
+// growing backward for larger fields. The compact front row remains compatible
+// with the ready-camera framing, while 100 racers no longer collapse into the
+// old 1.8–5m staging band.
 export function randomSlots(count) {
-  const slots = [];
-  const frontCount = Math.min(5, count);
+  const columns = 5;
   const frontBehind = 0.75;
-  // A paced front row uses the available lane band instead of clustering by
-  // chance in the middle. Shuffle the positions so roster order is not also
-  // the visual left-to-right order.
-  const frontHalf = Math.min(3.1, 0.85 * Math.max(0, frontCount - 1));
-  const frontLaterals = Array.from({ length: frontCount }, (_, i) =>
-    frontCount === 1 ? 0 : -frontHalf + (2 * frontHalf * i) / (frontCount - 1));
-  for (let i = frontLaterals.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [frontLaterals[i], frontLaterals[j]] = [frontLaterals[j], frontLaterals[i]];
-  }
-
-  let minDist = 1.7;
-  for (let i = 0; i < count; i++) {
-    let slot = null;
-    for (let tries = 0; tries < 80; tries++) {
-      if (tries === 40) minDist = 1.0; // relax spacing for big fields
-      const isFrontRow = i < frontCount;
-      const cand = {
-        lateral: isFrontRow
-          ? frontLaterals[i]
-          : (Math.random() * 2 - 1) * 3.3,
-        // Keep the first five in a compact line by the stripe. The remaining
-        // racers retain the old random feel while staying visibly behind it.
-        behind: isFrontRow
-          ? frontBehind
-          : 1.8 + Math.random() * 3.2,
-      };
-      slot = cand;
-      const ok = slots.every((s) =>
-        Math.hypot(s.lateral - cand.lateral, (s.behind - cand.behind) * 1.3) >= minDist);
-      if (ok) break;
-    }
-    slots.push(slot);
+  const rowGap = 1.6;
+  const lateralHalf = 3.1;
+  const slots = [];
+  for (let index = 0; index < count; index++) {
+    const row = Math.floor(index / columns);
+    const col = index % columns;
+    const columnsInRow = Math.min(columns, count - row * columns);
+    const lateral = columnsInRow === 1
+      ? 0
+      : -lateralHalf + (2 * lateralHalf * col) / (columnsInRow - 1);
+    slots.push({
+      lateral: Number(lateral.toFixed(3)),
+      behind: Number((frontBehind + row * rowGap).toFixed(3)),
+    });
   }
   return slots;
 }
