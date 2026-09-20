@@ -4,6 +4,9 @@ import { dressDuck } from './duck-costumes.js';
 import { waterAt } from './surface.js';
 
 const BODY_COLORS = [0xffdf63, 0xffedc0, 0xffffff, 0xb4dce9, 0xf5bac9, 0xb7dba3];
+// Keep the duck silhouette comfortably inside its 1.1m lane and leave a
+// little breathing room between the close front-row starting slots.
+export const DUCK_SCALE = 0.76;
 const mat = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.68 });
 export function createDuck({ seed = 1 } = {}) {
   const group = new THREE.Group();
@@ -38,6 +41,9 @@ export function createDuck({ seed = 1 } = {}) {
   }
   const wardrobe = dressDuck(swimmer, seed);
   group.userData.duckCostume = wardrobe.spec;
+  // Scale the complete rig together so the body, costume, feet, and label
+  // preserve their proportions while the start grid reads less crowded.
+  group.scale.setScalar(DUCK_SCALE);
   group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
   let heading = 0, celebrating = false;
