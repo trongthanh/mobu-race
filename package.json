@@ -11,7 +11,7 @@
     "start": "node server/index.js",
     "build:pages": "node scripts/build-pages.mjs",
     "deploy:worker": "wrangler deploy --config cloudflare/wrangler.jsonc",
-    "deploy:pages": "pnpm run build:pages && wrangler pages deploy dist --project-name ${CLOUDFLARE_PAGES_PROJECT:-mobu-race}"
+    "deploy:pages": "pnpm run build:pages && wrangler pages deploy dist --project-name ${CLOUDFLARE_PAGES_PROJECT:-moburace} --force"
   },
   "keywords": [],
   "author": "",
