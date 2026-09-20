@@ -1050,7 +1050,10 @@ export function createWorld(opts = {}) {
 
   // --- two cottages near the race; the rest are distant valley homes ---
   house(-a * 1.35, -b * 1.5, 0.5, 0xd32f2f, 1.85); // red roof, near the start
-  house(a * 0.2, -b * 1.95, 0.1, 0x7cb342, 1.7);    // green roof, near the road
+  // The 10s oval shrinks beneath this cottage's fixed-size footprint. Keep it
+  // beyond the outer edge so it cannot appear inside the opposite side of the ring.
+  const oppositeHouseZ = -Math.max(b * 1.95, outerB + 5.6);
+  house(a * 0.2, oppositeHouseZ, 0.1, 0x7cb342, 1.7); // green roof, near the road
   house(a * 2.6, -b * 2.6, -0.8, 0x1976d2, 1.65);  // distant blue roof
   house(a * 2.35, b * 2.5, 2.4, 0xf57c00, 1.75);   // distant orange roof
   house(-a * 2.7, b * 2.2, -0.4, 0x1976d2, 1.55); // distant blue roof
@@ -1112,6 +1115,16 @@ export function createWorld(opts = {}) {
     group.add(midTree);
     flowerPatch(2.5, 1.5);
     flowerPatch(-2.5, -1.5);
+
+    // A little farm life in the grassy ring keeps the oval from feeling empty.
+    // These positions are normalized to the infield, so they stay clear of the
+    // dirt lane even when the 10s course is at its smallest scale.
+    for (const [fx, fz] of [
+      [-0.55, -0.38], [-0.18, 0.28], [0.02, -0.42],
+    ]) sheep(fx * innerA, fz * innerB);
+    for (const [fx, fz] of [
+      [0.24, 0.08], [0.38, -0.24],
+    ]) pig(fx * innerA, fz * innerB);
   }
 
   // --- grandstand benches behind the start line ---
