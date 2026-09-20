@@ -832,6 +832,7 @@ function startRace(msg, elapsedOffset = 0) {
     r.progress = p0;
     r.finished = p0 >= 1;
     r.finishElapsed = r.finished ? msg.plan[r.id][msg.plan[r.id].length - 1][0] : null;
+    r.finishLateral = r.finished ? r.sepLat : null;
   }
   // Park finishers in a four-wide results grid rather than capping their
   // forward distance. A cap made every racer below rank 12 share the winner's
@@ -856,10 +857,13 @@ function startRace(msg, elapsedOffset = 0) {
   const lastResultsRow = Math.floor(Math.max(0, resultsCount - 1) / parkColumns);
   const firstResultsRowMeters = 1 + rowGap * lastResultsRow;
   byFinish.forEach((r, idx) => {
+    // A small race never reshuffles after the stripe: every racer preserves
+    // the lane they crossed in, including the winner.
+    r.lockFinishLane = preserveFinishLanes;
     if (idx === 0) {
-      // The winner gets a dedicated lead spot: they can celebrate clearly in
-      // front of the pack instead of sharing the first results row.
-      r.parkLateral = 0;
+      // The winner gets a dedicated lead spot on their own finish lane, so
+      // they can celebrate clearly in front of the pack.
+      r.parkLateral = r.lateral;
       // Lead by one clear parking row, not an exaggerated parade distance.
       r.coastMeters = firstResultsRowMeters + rowGap;
     } else {
@@ -1301,6 +1305,7 @@ function tick(timestamp) {
       if (p >= 1 && !r.finished) {
         r.finished = true;
         r.finishElapsed = planFinishTime(r);
+        r.finishLateral = r.sepLat;
         // The winner's celebration waits for the gate inside animate(): they
         // coast to their spot first, then start hopping once stopped.
         if (r.id === state.winnerId) r.setCelebrating(true);
@@ -1352,12 +1357,20 @@ function tick(timestamp) {
     for (let i = 0; i < n; i++) {
       const r = state.racers[i];
       const step = Math.min(dt, 0.05);
-      // Separation is part of the shared race presentation, not a duck-vs-mobu
-      // rule. Both skins use the same lateral response and track boundaries.
-      const targetLateral = r.finished && Number.isFinite(r.parkLateral) ? r.parkLateral : r.lateral;
-      const desiredVelocity = THREE.MathUtils.clamp((targetLateral - r.sepLat) * 0.6 + sepPushes[i] * 4, -1.2, 1.2);
-      r.lateralVelocity += (desiredVelocity - r.lateralVelocity) * (1 - Math.exp(-7 * step));
-      r.sepLat = THREE.MathUtils.clamp(r.sepLat + r.lateralVelocity * step, -BAND_MAX, BAND_MAX);
+      // A small field's finishers hold their crossing lane once across the
+      // stripe. This opts them out of the generic anti-overlap sidestep so
+      // they do not drift into a results queue.
+      if (r.finished && r.lockFinishLane) {
+        r.sepLat = Number.isFinite(r.finishLateral) ? r.finishLateral : r.lateral;
+        r.lateralVelocity = 0;
+      } else {
+        // Separation is part of the shared race presentation, not a duck-vs-mobu
+        // rule. Both skins use the same lateral response and track boundaries.
+        const targetLateral = r.finished && Number.isFinite(r.parkLateral) ? r.parkLateral : r.lateral;
+        const desiredVelocity = THREE.MathUtils.clamp((targetLateral - r.sepLat) * 0.6 + sepPushes[i] * 4, -1.2, 1.2);
+        r.lateralVelocity += (desiredVelocity - r.lateralVelocity) * (1 - Math.exp(-7 * step));
+        r.sepLat = THREE.MathUtils.clamp(r.sepLat + r.lateralVelocity * step, -BAND_MAX, BAND_MAX);
+      }
       const pos = world.lanePoint(r.dispP, r.sepLat);
       r.group.position.set(pos.x, pos.y, pos.z);
       const heading = facingAt(r.dispP, r.sepLat);
