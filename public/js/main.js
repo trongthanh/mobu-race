@@ -339,7 +339,11 @@ function runOfflineCommand(msg) {
         slot: slots[i],
         costumeSeed: Math.floor(Math.random() * 0x100000000),
       }));
-      offlineRace = { racers, timeSec: state.setup.timeSec, raceType: state.setup.raceType, plan: null, winnerId: null };
+      offlineRace = {
+        racers, timeSec: state.setup.timeSec, raceType: state.setup.raceType,
+        finishParking: racers.length <= SIMPLE_SHADOW_RACER_COUNT ? 'lanes' : 'grid',
+        plan: null, winnerId: null,
+      };
       handle({ type: 'race_created', timeSec: offlineRace.timeSec, raceType: offlineRace.raceType, racers });
       return;
     }
@@ -375,6 +379,7 @@ function startOfflineRace() {
     racers: offlineRace.racers,
     plan,
     winnerId: offlineRace.winnerId,
+    finishParking: offlineRace.finishParking,
   });
   const lastFinish = Math.max(...offlineRace.racers.map((r) => plan[r.id][plan[r.id].length - 1][0]));
   setOfflineTimer(finishOfflineRace, lastFinish * 1000 + 600);
@@ -845,7 +850,12 @@ function startRace(msg, elapsedOffset = 0) {
   // Small fields preserve their own lanes. As the field grows, add columns
   // only when needed while keeping enough lateral and forward clearance for
   // the Mobu silhouette.
-  const preserveFinishLanes = resultsCount <= 5;
+  // Live races receive this choice from the authoritative server/Worker.
+  // The fallback keeps older peers and offline races aligned with the same
+  // 20-racer threshold as the simple-shadow presentation.
+  const preserveFinishLanes = msg.finishParking
+    ? msg.finishParking === 'lanes'
+    : byFinish.length <= SIMPLE_SHADOW_RACER_COUNT;
   const parkingLayout = preserveFinishLanes
     ? { columns: 1, columnGap: 0, rowGap: 3.1 }
     : resultsCount <= 17

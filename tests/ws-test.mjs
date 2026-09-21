@@ -145,6 +145,7 @@ async function main() {
   assert.strictEqual(rc.timeSec, 20);
   assert.strictEqual(rc.raceType, 'lake');
   assert.strictEqual(rc.racers.length, 3);
+  assert.strictEqual(rc.finishParking, 'lanes', 'small live field preserves crossing lanes');
   assert.deepStrictEqual(rc.racers.map((r) => r.lane).sort(), [0, 1, 2]);
   const frontRowCount = Math.min(5, rc.racers.length);
   for (const [i, r] of rc.racers.entries()) {
@@ -190,6 +191,7 @@ async function main() {
   assert.strictEqual(rs.timeSec, 20);
   assert.strictEqual(rs.raceType, 'lake');
   assert.strictEqual(rs.racers.length, 3);
+  assert.strictEqual(rs.finishParking, 'lanes', 'race_start preserves server-authored finish mode');
   assert.deepStrictEqual(rs.racers.map((r) => r.lane).sort(), [0, 1, 2]);
   for (const r of rs.racers) assert.strictEqual(r.lane, Number(r.id.slice(1)), 'lane matches rN');
   for (const r of rs.racers) assert.ok(Number.isInteger(r.costumeSeed), 'race_start racers still carry costume seeds');
@@ -309,6 +311,7 @@ async function main() {
       (m) => m.type === 'race_created' && m.timeSec === timeSec,
       `race_created cap for ${timeSec}s`);
     assert.strictEqual(created.racers.length, maxRacers, `${timeSec}s create cap`);
+    assert.strictEqual(created.finishParking, maxRacers <= 20 ? 'lanes' : 'grid', `${timeSec}s finish mode`);
     assert.strictEqual(new Set(created.racers.map((r) => r.id)).size, maxRacers, `${timeSec}s unique racer ids`);
     assert.ok(created.racers.every((r) => Math.abs(r.slot.lateral) <= 3.3), `${timeSec}s slots stay on track`);
     send(B, { type: 'reset' });

@@ -28,6 +28,8 @@ function sameName(a, b) {
 // Host can only pick from these race durations; the track ring scales with it.
 const TIME_STEPS = [10, 20, 30, 60, 90, 120];
 const RACE_TYPES = new Set(['mobu', 'lake']);
+// Keep live finish presentation aligned with the client shadow/LOD threshold.
+const SIMPLE_SHADOW_RACER_COUNT = 20;
 
 function snapTimeStep(v, dflt = 30) {
   const n = Math.round(Number(v));
@@ -169,7 +171,7 @@ export function createGameServer(httpServer) {
     race.leaderId = null;
     race.finished = false;
 
-    broadcast({ type: 'race_start', timeSec, raceType: race.raceType, racers, plan, winnerId: race.winnerId });
+    broadcast({ type: 'race_start', timeSec, raceType: race.raceType, racers, plan, winnerId: race.winnerId, finishParking: race.finishParking });
 
     // leader tick every 500ms
     const leaderTimer = setInterval(() => {
@@ -256,7 +258,7 @@ export function createGameServer(httpServer) {
     };
     // Late joiners catch up to whatever stage the race is at.
     if (state === 'ready' && race) {
-      welcome.ready = { timeSec: race.timeSec, raceType: race.raceType, racers: race.racers };
+      welcome.ready = { timeSec: race.timeSec, raceType: race.raceType, racers: race.racers, finishParking: race.finishParking };
     } else if ((state === 'racing' || state === 'finished') && race) {
       const elapsed = state === 'finished'
         ? Math.max(...race.racers.map((r) => race.plan[r.id][race.plan[r.id].length - 1][0])) + 5
@@ -268,6 +270,7 @@ export function createGameServer(httpServer) {
         plan: race.plan,
         elapsed,
         winnerId: race.winnerId,
+        finishParking: race.finishParking,
       };
       if (state === 'finished') {
         welcome.results = race.lastResults;
@@ -339,9 +342,14 @@ export function createGameServer(httpServer) {
             costumeSeed: Math.floor(Math.random() * 0x100000000),
           }));
           clearRaceTimers();
-          race = { timers: [], racers, timeSec: setup.timeSec, raceType: setup.raceType };
+          // The finish formation is server-authored so every live client
+          // preserves lanes for a small field and uses the same grid otherwise.
+          race = {
+            timers: [], racers, timeSec: setup.timeSec, raceType: setup.raceType,
+            finishParking: racers.length <= SIMPLE_SHADOW_RACER_COUNT ? 'lanes' : 'grid',
+          };
           state = 'ready';
-          broadcast({ type: 'race_created', timeSec: race.timeSec, raceType: race.raceType, racers });
+          broadcast({ type: 'race_created', timeSec: race.timeSec, raceType: race.raceType, racers, finishParking: race.finishParking });
           return;
         }
         case 'start': {

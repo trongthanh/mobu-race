@@ -14,6 +14,8 @@ function sanitizeName(raw, fallback) {
 // Host can only pick from these race durations; the track ring scales with it.
 const TIME_STEPS = [10, 20, 30, 60, 90, 120];
 const RACE_TYPES = new Set(['mobu', 'lake']);
+// Keep live finish presentation aligned with the client shadow/LOD threshold.
+const SIMPLE_SHADOW_RACER_COUNT = 20;
 
 function snapTimeStep(v, dflt = 30) {
   const n = Math.round(Number(v));
@@ -134,7 +136,7 @@ export class RaceRoom {
       leaderId: null,
       finished: false,
     });
-    this.broadcast({ type: 'race_start', timeSec, raceType: this.race.raceType, racers, plan, winnerId: this.race.winnerId });
+    this.broadcast({ type: 'race_start', timeSec, raceType: this.race.raceType, racers, plan, winnerId: this.race.winnerId, finishParking: this.race.finishParking });
 
     this.race.leaderTimer = setInterval(() => {
       if (this.gameState !== 'racing' || !this.race || this.race.finished) return;
@@ -220,7 +222,7 @@ export class RaceRoom {
       setup: { names: this.setup.names, timeSec: this.setup.timeSec, raceType: this.setup.raceType },
     };
     if (this.gameState === 'ready' && this.race) {
-      welcome.ready = { timeSec: this.race.timeSec, raceType: this.race.raceType, racers: this.race.racers };
+      welcome.ready = { timeSec: this.race.timeSec, raceType: this.race.raceType, racers: this.race.racers, finishParking: this.race.finishParking };
     } else if ((this.gameState === 'racing' || this.gameState === 'finished') && this.race) {
       const lastFinish = Math.max(...this.race.racers.map((racer) => this.race.plan[racer.id].at(-1)[0]));
       welcome.race = {
@@ -230,6 +232,7 @@ export class RaceRoom {
         plan: this.race.plan,
         elapsed: this.gameState === 'finished' ? lastFinish + 5 : (Date.now() - this.race.startAt) / 1000,
         winnerId: this.race.winnerId,
+        finishParking: this.race.finishParking,
       };
       if (this.gameState === 'finished') {
         welcome.results = this.race.lastResults;
@@ -291,9 +294,14 @@ export class RaceRoom {
             costumeSeed: Math.floor(Math.random() * 0x100000000),
           }));
           this.clearRaceTimers();
-          this.race = { timers: [], racers, timeSec: this.setup.timeSec, raceType: this.setup.raceType };
+          // Keep live clients in the same finish presentation mode: smaller
+          // fields preserve finish lanes, while large fields use parking rows.
+          this.race = {
+            timers: [], racers, timeSec: this.setup.timeSec, raceType: this.setup.raceType,
+            finishParking: racers.length <= SIMPLE_SHADOW_RACER_COUNT ? 'lanes' : 'grid',
+          };
           this.gameState = 'ready';
-          this.broadcast({ type: 'race_created', timeSec: this.race.timeSec, raceType: this.race.raceType, racers });
+          this.broadcast({ type: 'race_created', timeSec: this.race.timeSec, raceType: this.race.raceType, racers, finishParking: this.race.finishParking });
         }
         break;
       case 'start':
