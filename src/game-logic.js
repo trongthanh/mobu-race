@@ -6,8 +6,8 @@
 //   Adapter {
 //     send(peer, msg)            – send one JSON-serialisable object
 //     broadcast(msg)             – send to every connected peer
-//     registerPeer(peer, user)   – called when a peer is registered
-//     unregisterPeer(peer)       – called when a peer is removed
+//     addPeer(peer)              – register a new peer for broadcast
+//     removePeer(peer)           – unregister a peer from broadcast
 //     schedule(fn, ms)           – setTimeout equivalent, returns a timer id
 //     clearSchedule(id)          – clearTimeout equivalent
 //     scheduleInterval(fn, ms)   – setInterval equivalent, returns a timer id
@@ -279,7 +279,7 @@ export function createGameLogic(adapter) {
       index: nextIndex++,
     };
     users.set(peer, user);
-    if (adapter.registerPeer) adapter.registerPeer(peer, user);
+    adapter.addPeer(peer);
 
     const welcome = {
       type: 'welcome',
@@ -327,7 +327,7 @@ export function createGameLogic(adapter) {
     if (!user) return;
     const wasHost = user.isHost;
     users.delete(peer);
-    if (adapter.unregisterPeer) adapter.unregisterPeer(peer);
+    adapter.removePeer(peer);
     if (wasHost) promoteHost();
     else broadcastUsers();
     if (users.size === 0 && state !== 'idle') {

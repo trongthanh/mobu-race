@@ -10,22 +10,18 @@ export { buildPlan, maxRacersForTime, randomSlots, progressAt };
 // ---------------------------------------------------------------------------
 
 function makeCfAdapter() {
-  const peers = new Map(); // ws -> user (maintained by registerPeer / unregisterPeer)
+  const peers = new Set();
   return {
+    addPeer(ws) { peers.add(ws); },
+    removePeer(ws) { peers.delete(ws); },
     send(ws, obj) {
       if (ws.readyState === 1) ws.send(JSON.stringify(obj));
     },
     broadcast(obj) {
       const data = JSON.stringify(obj);
-      for (const ws of peers.keys()) {
+      for (const ws of peers) {
         if (ws.readyState === 1) ws.send(data);
       }
-    },
-    registerPeer(ws, user) {
-      peers.set(ws, user);
-    },
-    unregisterPeer(ws) {
-      peers.delete(ws);
     },
     schedule(fn, ms) {
       return setTimeout(fn, ms);

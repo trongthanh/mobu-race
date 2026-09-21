@@ -13,14 +13,17 @@ export { buildPlan, maxRacersForTime, randomSlots, progressAt };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------- Node.js adapter ----------
-function createNodeAdapter(wss) {
+function createNodeAdapter() {
+  const peers = new Set();
   return {
+    addPeer(ws) { peers.add(ws); },
+    removePeer(ws) { peers.delete(ws); },
     send(ws, obj) {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
     },
     broadcast(obj) {
       const data = JSON.stringify(obj);
-      for (const ws of wss.clients) {
+      for (const ws of peers) {
         if (ws.readyState === ws.OPEN) ws.send(data);
       }
     },
@@ -48,7 +51,7 @@ function createNodeAdapter(wss) {
 // ---------- server factory ----------
 export function createGameServer(httpServer) {
   const wss = new WebSocketServer({ server: httpServer });
-  const logic = createGameLogic(createNodeAdapter(wss));
+  const logic = createGameLogic(createNodeAdapter());
 
   wss.on('connection', (ws) => {
     logic.connect(ws);
