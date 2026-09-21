@@ -63,7 +63,7 @@ html, body {
 .overlay.panel {
   position: relative;
   inset: auto;
-  width: min(420px, 88vw);
+  width: min(520px, 92vw);
   background: #fff6e0;
   pointer-events: auto;
 }
@@ -141,16 +141,20 @@ label, .field-label {
     0 3px 0 #8a5a2b,
     0 6px 12px rgba(0, 0, 0, 0.3);
   letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.16em;
   text-align: center;
 }
 
 .logo-mascot {
-  display: inline-block;
+  display: block;
   width: 1.15em;
   height: 1.25em;
   object-fit: contain;
-  vertical-align: -0.22em;
-  margin-left: 0.06em;
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 #subtitle {
