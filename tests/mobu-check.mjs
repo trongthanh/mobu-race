@@ -44,8 +44,8 @@ function main() {
   const headW = headBox.max.x - headBox.min.x;
   const torsoW = bodyBox.max.x - bodyBox.min.x;
   assert.ok(lipW > headW, `lips wider than head (${lipW.toFixed(2)} vs ${headW.toFixed(2)})`);
-  assert.ok(lipW / headW >= 1.25 && lipW / headW <= 1.34, `reference lips/head width ratio 1.25–1.34 (got ${(lipW / headW).toFixed(2)})`);
-  assert.ok(LIP_SCALE >= 0.9 && LIP_SCALE <= 0.95, 'whole-mouth reference scale remains a subtle reduction');
+  assert.ok(lipW / headW >= 1.20 && lipW / headW <= 1.30, `reference lips/head width ratio 1.20–1.30 (got ${(lipW / headW).toFixed(2)})`);
+  assert.ok(LIP_SCALE >= 0.86 && LIP_SCALE <= 0.90, 'whole-mouth scale remains a modest reduction');
   assert.ok(lipBox.max.z > headBox.max.z, `grin protrudes past the head (${lipBox.max.z.toFixed(2)} vs ${headBox.max.z.toFixed(2)})`);
   assert.ok(torsoW > headW, `pear, not lollipop: torso ${torsoW.toFixed(2)} > head ${headW.toFixed(2)}`);
   console.log(`grin: width ${lipW.toFixed(2)} (${(lipW / headW).toFixed(2)}× head), tall ${(lipBox.max.y - lipBox.min.y).toFixed(2)}, protrudes z ${lipBox.max.z.toFixed(2)} — OK`);
