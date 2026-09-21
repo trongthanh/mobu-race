@@ -4,14 +4,16 @@
 // adapter interface passed at construction time:
 //
 //   Adapter {
-//     send(peer, msg)       – send one JSON-serialisable object
-//     broadcast(msg)        – send to every connected peer
-//     schedule(fn, ms)      – setTimeout equivalent, returns a timer id
-//     clearSchedule(id)     – clearTimeout equivalent
-//     scheduleInterval(fn, ms) – setInterval equivalent, returns a timer id
+//     send(peer, msg)            – send one JSON-serialisable object
+//     broadcast(msg)             – send to every connected peer
+//     registerPeer(peer, user)   – called when a peer is registered
+//     unregisterPeer(peer)       – called when a peer is removed
+//     schedule(fn, ms)           – setTimeout equivalent, returns a timer id
+//     clearSchedule(id)          – clearTimeout equivalent
+//     scheduleInterval(fn, ms)   – setInterval equivalent, returns a timer id
 //     clearScheduleInterval(id)
-//     now()                 – Date.now() equivalent
-//     uuid()                – returns a fresh unique string
+//     now()                      – Date.now() equivalent
+//     uuid()                     – returns a fresh unique string
 //   }
 //
 // The caller owns the adapter and is responsible for calling connect() /
@@ -277,6 +279,7 @@ export function createGameLogic(adapter) {
       index: nextIndex++,
     };
     users.set(peer, user);
+    if (adapter.registerPeer) adapter.registerPeer(peer, user);
 
     const welcome = {
       type: 'welcome',
@@ -324,6 +327,7 @@ export function createGameLogic(adapter) {
     if (!user) return;
     const wasHost = user.isHost;
     users.delete(peer);
+    if (adapter.unregisterPeer) adapter.unregisterPeer(peer);
     if (wasHost) promoteHost();
     else broadcastUsers();
     if (users.size === 0 && state !== 'idle') {

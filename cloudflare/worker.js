@@ -9,16 +9,23 @@ export { buildPlan, maxRacersForTime, randomSlots, progressAt };
 // Cloudflare adapter
 // ---------------------------------------------------------------------------
 
-function makeCfAdapter(room) {
+function makeCfAdapter() {
+  const peers = new Map(); // ws -> user (maintained by registerPeer / unregisterPeer)
   return {
     send(ws, obj) {
       if (ws.readyState === 1) ws.send(JSON.stringify(obj));
     },
     broadcast(obj) {
       const data = JSON.stringify(obj);
-      for (const ws of room.users.keys()) {
+      for (const ws of peers.keys()) {
         if (ws.readyState === 1) ws.send(data);
       }
+    },
+    registerPeer(ws, user) {
+      peers.set(ws, user);
+    },
+    unregisterPeer(ws) {
+      peers.delete(ws);
     },
     schedule(fn, ms) {
       return setTimeout(fn, ms);
@@ -48,8 +55,7 @@ function makeCfAdapter(room) {
 export class RaceRoom {
   constructor(ctx) {
     this.ctx = ctx;
-    this.users = new Map(); // ws -> user (kept for the adapter's broadcast)
-    this.logic = createGameLogic(makeCfAdapter(this));
+    this.logic = createGameLogic(makeCfAdapter());
   }
 
   async fetch(request) {
