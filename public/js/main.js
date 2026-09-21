@@ -82,6 +82,7 @@ function rebuildWorld(timeSec, raceType = state.setup.raceType) {
   // Racers/watchers were parented to the old scene — recreate them.
   for (const r of state.racers) scene.add(r.group);
   for (const [id, w] of state.watchers) {
+    oldScene.remove(w.group);
     disposeRig(w.group);
     state.watchers.delete(id);
   }
@@ -277,6 +278,7 @@ function clearOfflineTimers() {
 }
 
 const TIME_STEPS = [10, 20, 30, 60, 90, 120];
+const OFFLINE_SPECTATOR_COUNT = 23; // plus the host: three full grandstand rows
 
 function snapTimeStep(value, fallback = 30) {
   const seconds = Math.round(Number(value));
@@ -437,6 +439,16 @@ function join() {
 
 function playOffline() {
   const name = 'Race host';
+  const offlineUsers = [{ id: 'offline-host', name, isHost: true }];
+  for (let i = 0; i < OFFLINE_SPECTATOR_COUNT; i++) {
+    const number = String(i + 1).padStart(2, '0');
+    offlineUsers.push({
+      id: `offline-spectator-${i + 1}`,
+      name: `Spectator ${number}`,
+      isHost: false,
+      ambient: true,
+    });
+  }
   state.offline = true;
   el.join.classList.add('hidden');
   el.hud.classList.remove('hidden');
@@ -444,7 +456,7 @@ function playOffline() {
     type: 'welcome',
     id: 'offline-host',
     isHost: true,
-    users: [{ id: 'offline-host', name, isHost: true }],
+    users: offlineUsers,
     state: 'idle',
     setup: { names: [], timeSec: 30, raceType: selectedRaceType() },
   });
@@ -652,7 +664,7 @@ function renderWatchers() {
   const usersById = new Map(state.users.map((u) => [u.id, u]));
   for (const [id, w] of state.watchers) {
     const user = usersById.get(id);
-    if (!user || w.name !== user.name || w.isHost !== user.isHost) {
+    if (!user || w.name !== user.name || w.isHost !== user.isHost || w.ambient !== Boolean(user.ambient)) {
       scene.remove(w.group);
       disposeRig(w.group);
       state.watchers.delete(id);
@@ -663,11 +675,18 @@ function renderWatchers() {
     // The avatar's outfit is hashed from the visitor's id+name so every
     // client renders the identical crowd (never per-client Math.random()).
     const w = createWatcher({ seed: costumeSeedFromText(u.id + '|' + u.name) });
-    const sprite = makeNameSprite(u.name + (u.isHost ? ' 👑' : ''), { height: 0.5 });
-    sprite.position.y = 2.0;
-    w.group.add(sprite);
+    // Ambient offline crowd members do not need floating labels. Avoiding
+    // their canvas textures keeps a large crowd cheap while the host label
+    // remains useful for the familiar single-player presentation.
+    const sprite = u.ambient ? null : makeNameSprite(u.name + (u.isHost ? ' 👑' : ''), { height: 0.5 });
+    if (sprite) {
+      sprite.position.y = 2.0;
+      w.group.add(sprite);
+    }
     scene.add(w.group);
-    state.watchers.set(u.id, { ...w, sprite, name: u.name, isHost: u.isHost });
+    state.watchers.set(u.id, {
+      ...w, sprite, name: u.name, isHost: u.isHost, ambient: Boolean(u.ambient),
+    });
   });
   // Re-seat everyone so indices stay packed.
   state.users.forEach((u, i) => {
@@ -680,7 +699,7 @@ function placeWatcher(w, index, total) {
   const t = world.track;
   // Grandstand rows on the grass just outside the start/finish straight
   // (beyond the outer rim of the track).
-  const perRow = 8;
+  const perRow = 8; // matches the three 17.2m grandstand benches
   const row = Math.floor(index / perRow);
   const col = index % perRow;
   const x = (col - (Math.min(total, perRow) - 1) / 2) * 2.2 + ((row % 2) * 1.1);

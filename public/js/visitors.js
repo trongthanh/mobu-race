@@ -10,6 +10,17 @@ const BOTTOM = [0x485b79, 0x6a625d, 0x667b64, 0x83667d];
 export const VISITOR_HAIR = ['swept', 'bob', 'curls', 'bun', 'cap', 'beanie'];
 export const VISITOR_OUTFITS = ['sweater', 'overalls', 'cardigan', 'dress'];
 
+// Spectators are background dressing, so never put them in the shadow map.
+// One shared, unlit ellipse gives the same grounding cue at a fraction of the
+// cost of casting shadows for every articulated spectator mesh.
+const fakeShadowGeometry = new THREE.CircleGeometry(1, 16);
+fakeShadowGeometry.userData.shared = true;
+const fakeShadowMaterial = new THREE.MeshBasicMaterial({
+  color: 0x352b25, transparent: true, opacity: 0.3,
+  depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+});
+fakeShadowMaterial.userData.shared = true;
+
 function randomFromSeed(seed) {
   let a = seed >>> 0;
   return () => {
@@ -202,7 +213,21 @@ export function createWatcher({ seed = 1 } = {}) {
       lock.rotation.z = -0.35;
     }
   }
-  group.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  // Spectators always use a cheap fake ground shadow. Their detailed meshes
+  // stay out of the renderer's shadow pass, which matters with a full row of
+  // animated crowd members.
+  group.traverse(o => {
+    if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; }
+  });
+  const fakeShadow = new THREE.Mesh(fakeShadowGeometry, fakeShadowMaterial);
+  fakeShadow.name = 'spectator-fake-shadow';
+  fakeShadow.rotation.x = -Math.PI / 2;
+  fakeShadow.position.y = 0.006;
+  fakeShadow.scale.set(0.42, 0.22, 1);
+  fakeShadow.renderOrder = 1;
+  fakeShadow.castShadow = false;
+  fakeShadow.receiveShadow = false;
+  group.add(fakeShadow);
 
   let heading = 0;
   function animate(t, excite = 0) {

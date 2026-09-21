@@ -288,11 +288,12 @@ export function createMobu(opts = {}) {
 }
 
 /** Free a removed rig's GPU buffers. Materials cached in rig.js are shared
- *  across the whole cast and are skipped (`userData.shared`). */
+ *  across the whole cast and are skipped (`userData.shared`). Shared
+ *  spectator fake-shadow geometry is skipped for the same reason. */
 export function disposeRig(rootObj) {
   rootObj.traverse((o) => {
     if (o.isMesh || o.isSprite) {
-      if (o.geometry) o.geometry.dispose();
+      if (o.geometry && !o.geometry.userData?.shared) o.geometry.dispose();
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) {
         if (!m) continue;
