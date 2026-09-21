@@ -33,29 +33,36 @@ node tests/surface-check.mjs # waves, buoyancy, duck wardrobe, foot contact, tra
 node tests/visitor-check.mjs # seeded visitor looks, planted feet, poses, mesh budget
 ```
 
-## Cloudflare Pages deployment
+## Cloudflare deployment (automatic)
 
-Yes—use **Cloudflare Pages for the static Three.js client** and the included
+Production uses **Cloudflare Pages for the static Three.js client** and the included
 **Cloudflare Worker + Durable Object for the authoritative WebSocket room**. Pages alone
 cannot run this project's Express/`ws` server or share live room state between visitors.
 
-1. Authenticate, then choose a globally unique Worker name in
-   `cloudflare/wrangler.jsonc` and a Pages project name (the `mobu-race` default in
-   `package.json` is overridable with `CLOUDFLARE_PAGES_PROJECT`).
-   ```bash
-   pnpm exec wrangler login
-   pnpm run deploy:worker
-   ```
-2. Copy the Worker URL printed by Wrangler (for example,
-   `https://mobu-race-realtime.<account>.workers.dev`) and deploy the static site with it:
-   ```bash
-   MOBU_RACE_WS_URL=https://mobu-race-realtime.<account>.workers.dev/ws pnpm run deploy:pages
-   ```
-   The build converts `https` to `wss` and writes the endpoint into the generated
-   `dist/config.js`; do not commit `dist/`.
-3. For a Git-connected Pages project, set the Pages build command to
-   `pnpm run build:pages`, build output directory to `dist`, and add
-   `MOBU_RACE_WS_URL` as a Pages build variable. Deploy the Worker first.
+Both Cloudflare projects are connected to this repository, so Cloudflare builds and deploys
+both components automatically after every push:
+
+- **Pages project** — repository root `/`, build command `pnpm run build:pages`, output
+  directory `dist`, and `MOBU_RACE_WS_URL` set to the Worker endpoint (for example,
+  `https://mobu-race-realtime.<account>.workers.dev/ws`). The build writes the endpoint to
+  `dist/config.js`; do not commit `dist/`.
+- **Worker project** — use `cloudflare/wrangler.jsonc` and configure the Workers Build
+  deploy command as `pnpm exec wrangler deploy --config cloudflare/wrangler.jsonc`.
+  Cloudflare deploys the Worker and its Durable Object from the same Git push.
+
+One-time Cloudflare setup is still required: create the Worker and Pages projects, connect
+them to the repository, choose a globally unique Worker name in
+`cloudflare/wrangler.jsonc`, and set the Pages `MOBU_RACE_WS_URL` variable after the Worker
+URL is known. After that, pushing to Git is the deployment process—do not add a separate
+CI deployment workflow.
+
+The local scripts remain available for manual validation or an emergency one-off deploy:
+
+```bash
+pnpm run build:pages
+pnpm run deploy:worker
+MOBU_RACE_WS_URL=https://mobu-race-realtime.<account>.workers.dev/ws pnpm run deploy:pages
+```
 
 The client retains same-origin WebSockets for `pnpm start`; `public/config.js` is its local
 fallback. The production build replaces it with the Worker endpoint.
@@ -116,7 +123,10 @@ Fonts), falling back to the system sans-serif stack.
 ## Structure
 
 ```
-server/index.js        Node + express + ws game server (host, race state machine, plans)
+src/game-logic.js      Shared pure game logic: state machine, message handling, progressAt
+                       (no platform deps — called via a thin adapter interface)
+server/index.js        Node.js adapter: express + ws wiring around game-logic
+cloudflare/worker.js   Cloudflare adapter: Durable Object + WebSocketPair around game-logic
 public/js/main.js      Route-aware private/live client control, UI, cameras, race rendering
 public/js/race-plan.js Shared offline race-plan and start-grid generator
 public/js/environment.js  Procedural cozy world (oval track, trees, houses, lights)
@@ -135,3 +145,36 @@ public/index.html      UI shell (join screen, host panel, HUD, celebration)
 tests/ws-test.mjs      End-to-end protocol test (host flow, plan validity, drama, results)
 tests/mobu-check.mjs   Headless mobu rig invariants (grin/head ratios, grounding, shells)
 ```
+
+## Server architecture
+
+The game server logic lives in a single **pure module** (`src/game-logic.js`) that is
+shared by both the Node.js dev server and the Cloudflare Worker. It never touches a
+WebSocket, HTTP, or timer API directly — instead it receives a **platform adapter**
+object at construction time:
+
+```
+Adapter {
+  send(peer, msg)              – send one JSON-serialisable object
+  broadcast(msg)               – send to every connected peer
+  schedule(fn, ms)             – setTimeout equivalent
+  clearSchedule(id)            – clearTimeout equivalent
+  scheduleInterval(fn, ms)     – setInterval equivalent
+  clearScheduleInterval(id)    – clearInterval equivalent
+  now()                        – Date.now() equivalent
+  uuid()                       – fresh unique string
+}
+```
+
+The adapter pattern means:
+- **One state machine** — `idle → ready → countdown → racing → finished` transitions
+  are identical across platforms
+- **One message handler** — `ping/hello/rename/setup/create/start/reset/assign_host`
+  all behave the same way
+- **One `progressAt` interpolation** — duplicated in `main.js` (client) and
+  `plan-check.mjs`, but the canonical server implementation lives here
+- Both adapters are thin — the Node.js one is ~40 lines, the Cloudflare one is ~50 lines
+
+When modifying game behaviour (new message types, state transitions, plan logic,
+sanitisation rules), change **only `src/game-logic.js`**. The adapter files
+(`server/index.js`, `cloudflare/worker.js`) should rarely need changes.

@@ -18,16 +18,37 @@ PLAN.md for the original brief.
   (grin/head ratios, grounded feet, ~3.75 canonical height, garment shells, pose
   finiteness). Run it after touching `rig.js` / `mobu.js` / `costumes.js`.
 
+## Cloudflare deployment
+
+Production is Git-connected on Cloudflare: both the Pages site and the Worker/Durable
+Object are built and deployed automatically after a push. Keep the two projects aligned:
+
+- Pages runs `pnpm run build:pages` from the repository root and publishes `dist/`.
+  `MOBU_RACE_WS_URL` is a Pages build variable pointing at the Worker `/ws` endpoint.
+- Workers deploy with `pnpm exec wrangler deploy --config cloudflare/wrangler.jsonc`.
+  The Worker entrypoint is `cloudflare/worker.js`; its Durable Object binding and
+  migrations live in `cloudflare/wrangler.jsonc`.
+
+Do not add a separate CI deployment workflow or commit `dist/`. The `deploy:pages` and
+`deploy:worker` package scripts are manual fallbacks; normal production deployment is a
+Cloudflare build triggered by Git.
+
 ## Verification
 
 - After implementing a substantial user-visible change, verify it in the browser with Chrome DevTools MCP. For a full implementation check, always hand off to a background agent pinned to `openai-codex/gpt-5.6-luna`; it must exercise the relevant flow, inspect the rendered scene, and check the console. For small, targeted changes (for example, a generator button's label, layout, or click action), do not start browser verification automatically: ask the user for confirmation first. Once confirmed, the primary agent should use Chrome DevTools MCP directly; do not delegate these quick checks.
 
 ## Layout
 
-- `server/index.js` — everything server-side: host role, state machine
-  (`idle | ready | countdown | racing | finished`), `buildPlan` (winner pre-decided, pack
-  paced off one baseline with surge bumps), start slots (random lateral/behind meters),
-  and costume-spec passthrough (validated structurally only — slot ids are client-side).
+- `src/game-logic.js` — **pure shared game logic**: state machine (`idle | ready |
+  countdown | racing | finished`), `buildPlan` / `randomSlots` re-exports, message
+  handling (`ping/hello/rename/setup/create/start/reset/assign_host`), name validation,
+  `progressAt`, `sanitizeSetup`, `syncVisitors` logic. No platform dependencies —
+  communicates through a thin adapter object passed at construction.
+- `server/index.js` — Node.js adapter: express + ws wiring around `createGameLogic`.
+  Maintains the `createGameServer` export for tests. Also hosts the static file server
+  and auto-start (`pnpm start`) entrypoint.
+- `cloudflare/worker.js` — Cloudflare adapter: `RaceRoom` Durable Object + `WebSocketPair`
+  wiring around `createGameLogic`. Entrypoint routes `/ws` to the DO.
 - `public/js/main.js` — client: WS handling, race scene, cameras, HUD, localStorage.
 - `public/js/environment.js` — procedural world; `lanePoint(progress, lateral)` takes
   **meters from the centerline** (lane band is ±4.4; keep racers within ±3.3).
@@ -41,7 +62,8 @@ PLAN.md for the original brief.
   each `[itemId, paletteIndex]`; `applyCostume`, `randomCostume`, seed-based outfits.
 - `public/js/confetti.js` — winner celebration (dependency-free canvas).
 - `public/vendor/three.module.js` — vendored Three.js; clients load plain ES modules from
-  the static `public/` root — there is no build step, don't introduce one.
+  the static `public/` root. There is no bundler: Cloudflare Pages runs the lightweight
+  `build:pages` step only to copy `public/` and generate the Worker endpoint config.
 
 ## Architecture rules
 
@@ -53,8 +75,16 @@ PLAN.md for the original brief.
   clients derive the outfit via `costumeFromSeed(seed)`; a racer without a seed falls back
   to `costumeSeedFromText(id|name)`, also deterministic across clients. Cosmetic
   randomness is OK only if it converges (e.g. the anti-overlap sidestep in `tick()`).
-- `progressAt()` exists duplicated in server, client, and plan-check — keep the
-  implementations identical when touching one.
+- `progressAt()` lives in `src/game-logic.js` (canonical), duplicated in `public/js/main.js`
+  (client) and `tests/plan-check.mjs` — keep the three implementations identical when
+  touching one.
+- **Game-logic changes go in `src/game-logic.js` only**. The adapter files
+  (`server/index.js`, `cloudflare/worker.js`) are just wiring — rarely need changes.
+  When adding a new message type: add the handler case in `game-logic.js`, add the client
+  handling in `main.js`, add the assertion in `ws-test.mjs`.
+- The adapter interface (`send`, `broadcast`, `schedule`, `clearSchedule`,
+  `scheduleInterval`, `clearScheduleInterval`, `now`, `uuid`) is defined at the top of
+  `src/game-logic.js`. If you need a new platform capability, add it to both adapters.
 - Server state machine and message types are asserted by `tests/ws-test.mjs`; the winner
   screen persists until the host sends `reset` (allowed in `ready` and `finished` only).
 - Racer track position maps plan progress via
