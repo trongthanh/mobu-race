@@ -178,3 +178,7 @@ The adapter pattern means:
 When modifying game behaviour (new message types, state transitions, plan logic,
 sanitisation rules), change **only `src/game-logic.js`**. The adapter files
 (`server/index.js`, `cloudflare/worker.js`) should rarely need changes.
+
+## License
+
+This project is available under the [ISC License](LICENSE).
