@@ -16,7 +16,14 @@ const edition = isMoonRace ? 'moon' : 'classic';
 document.body.classList.toggle('live-race', isLiveRace);
 document.body.classList.toggle('moon-race', isMoonRace);
 if (isMoonRace) {
-  document.title = 'Mid-Autumn Mobu Race 🥮';
+  const moonTitle = 'Mid-Autumn Festival Mobu Race 🏮';
+  const moonDescription = 'Celebrate Tết Trung Thu with Mobu Race: a cozy moonlit multiplayer race with glowing Vietnamese lanterns, a harvest moon, and dramatic finishes.';
+  document.title = moonTitle;
+  document.querySelector('meta[name="description"]').content = moonDescription;
+  document.querySelector('meta[property="og:title"]').content = moonTitle;
+  document.querySelector('meta[property="og:description"]').content = moonDescription;
+  document.querySelector('meta[name="twitter:title"]').content = moonTitle;
+  document.querySelector('meta[name="twitter:description"]').content = moonDescription;
   document.querySelector('meta[name="theme-color"]').content = '#17243d';
   document.querySelector('link[rel="canonical"]').href = '/moon';
   $('subtitle').textContent = 'Tết Trung Thu · A little moonlight, a lot of magic.';
