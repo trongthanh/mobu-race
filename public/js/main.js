@@ -11,7 +11,25 @@ import { buildPlan, maxRacersForTime, randomSlots } from './race-plan.js';
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const isLiveRace = location.pathname === '/live' || location.pathname === '/live/';
+const isMoonRace = location.pathname === '/moon' || location.pathname === '/moon/';
+const edition = isMoonRace ? 'moon' : 'classic';
 document.body.classList.toggle('live-race', isLiveRace);
+document.body.classList.toggle('moon-race', isMoonRace);
+if (isMoonRace) {
+  document.title = 'Mid-Autumn Mobu Race 🥮';
+  document.querySelector('meta[name="theme-color"]').content = '#17243d';
+  document.querySelector('link[rel="canonical"]').href = '/moon';
+  $('subtitle').textContent = 'Tết Trung Thu · A little moonlight, a lot of magic.';
+  const mobuCard = document.querySelector('input[value="mobu"]').closest('label');
+  mobuCard.querySelector('.race-type-icon').textContent = '🏮';
+  mobuCard.querySelector('strong').textContent = 'Moonlight Mobu Parade';
+  mobuCard.querySelector('small').textContent = 'Carry a glowing lantern to the finish';
+  document.querySelector('input[value="lake"]').closest('label').querySelector('small').textContent = 'Paddle beneath the harvest moon';
+  $('startBtn').textContent = '🏮 Start race';
+  $('congratsTitle').textContent = '🥮 Winner 🥮';
+  $('editionLink').textContent = '☀️ Back to the daytime edition';
+  $('editionLink').href = '/';
+}
 const raceTypeInputs = [...document.querySelectorAll('input[name="raceType"]')];
 const el = {
   join: $('join'), nameInput: $('nameInput'), joinBtn: $('joinBtn'),
@@ -70,13 +88,13 @@ document.body.prepend(renderer.domElement);
 function scaleForTime(timeSec) {
   return Math.min(2.6, Math.max(0.6, 0.55 + timeSec / 60));
 }
-let world = createWorld({ trackScale: scaleForTime(30), raceType: 'mobu' });
+let world = createWorld({ trackScale: scaleForTime(30), raceType: 'mobu', edition });
 let scene = world.scene;
 
 function rebuildWorld(timeSec, raceType = state.setup.raceType) {
   const oldScene = scene;
   scene = null;
-  const next = createWorld({ trackScale: scaleForTime(timeSec), raceType });
+  const next = createWorld({ trackScale: scaleForTime(timeSec), raceType, edition });
   world = next;
   scene = next.scene;
   // Racers/watchers were parented to the old scene — recreate them.
@@ -618,7 +636,8 @@ function refreshSetupUI() {
   const n = state.setup.names.length;
   refreshNameCount(state.setup.names);
   const plural = n === 1 ? '' : 's';
-  const course = state.setup.raceType === 'lake' ? '🦆 Lake Duck Derby' : '🏁 Countryside Mobu Dash';
+  const course = state.setup.raceType === 'lake' ? '🦆 Lake Duck Derby'
+    : isMoonRace ? '🏮 Moonlight Mobu Parade' : '🏁 Countryside Mobu Dash';
   el.setupInfo.textContent = `${n} racer${plural} signed up · ${state.setup.timeSec}s · ${course}`;
   el.waitingRacers.classList.toggle('hidden', n === 0);
   el.waitingRacerList.innerHTML = '';
@@ -783,7 +802,8 @@ function buildRaceScene(msg) {
     const seed = Number.isFinite(r.costumeSeed)
       ? r.costumeSeed >>> 0
       : costumeSeedFromText(r.id + '|' + r.name);
-    const character = raceType === 'lake' ? createDuck({ seed }) : createMobu();
+    const character = raceType === 'lake' ? createDuck({ seed })
+      : createMobu(isMoonRace ? { lanternSeed: seed } : {});
     if (raceType !== 'lake') character.setCostume(costumeFromSeed(seed));
     const { group, animate } = character;
     if (useSimpleShadows) {

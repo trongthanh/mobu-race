@@ -12,6 +12,7 @@ import {
 } from './rig.js';
 import { applyCostume } from './costumes.js';
 import { createMouthGeometry } from './mobu-mouth.js';
+import { createCarriedLantern } from './lanterns.js';
 
 // World-scale factor: the canonical rig is 3.75 tall, the track was built
 // around a ~1.8-unit mobu (lane width 1.1). Scale the whole rig, never parts.
@@ -185,6 +186,10 @@ export function createMobu(opts = {}) {
   }
   setCostume(null); // the default: bare amber mobu in his classic shorts
 
+  // Only land racers in the Moon edition opt in. Wardrobe changes never remove it.
+  const carriedLantern = Number.isFinite(opts.lanternSeed) ? createCarriedLantern(opts.lanternSeed) : null;
+  if (carriedLantern) hands[1].add(carriedLantern.group);
+
   // ------------------------------------------------------- animation
   // Heading (travel direction) lives on the OUTER group's rotation.y; the
   // run/idle cycles only add a wobble on top. Lean/roll go on `upper`, so
@@ -281,6 +286,13 @@ export function createMobu(opts = {}) {
       const flap = phase < 0.5 ? Math.sin((phase / 0.5) * Math.PI) : 0;
       lips.position.y = -flap * 0.05;
       tufts.rotation.x = Math.sin(t * 0.7 + 1) * 0.04;
+    }
+    if (carriedLantern) {
+      // Hold the bamboo handle gently forward instead of swinging it through
+      // the body. Counter-rotate at the hand so the lantern hangs upright.
+      arms[1].rotation.set(-0.28, 0, cheering ? 1.1 : ARM_OUT_ROT + 0.12);
+      carriedLantern.group.quaternion.copy(arms[1].quaternion).invert();
+      carriedLantern.animate(t);
     }
   }
 

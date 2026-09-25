@@ -17,6 +17,10 @@ PLAN.md for the original brief.
 - `node tests/mobu-check.mjs` — headless mobu rig invariants from `ref/MOBU.md` §10
   (grin/head ratios, grounded feet, ~3.75 canonical height, garment shells, pose
   finiteness). Run it after touching `rig.js` / `mobu.js` / `costumes.js`.
+- `node tests/moon-check.mjs` — seeded lantern shapes, carry poses, ground clearance,
+  disposal and fixed lighting budget for the `/moon` Mid-Autumn edition.
+- `node tests/scenery-check.mjs` — track-facing house facades in both editions;
+  Moon-only goat/coconut replacements, geometry and grounding across land/lake scales.
 
 ## Cloudflare deployment
 
@@ -50,6 +54,14 @@ Cloudflare build triggered by Git.
 - `cloudflare/worker.js` — Cloudflare adapter: `RaceRoom` Durable Object + `WebSocketPair`
   wiring around `createGameLogic`. Entrypoint routes `/ws` to the DO.
 - `public/js/main.js` — client: WS handling, race scene, cameras, HUD, localStorage.
+- `/moon` (also `/moon/`) is a private-race presentation skin, not a new race type.
+  Pass `edition: 'moon'` into every world rebuild; only land racers receive
+  `createMobu({ lanternSeed })` derived from their existing costume seed. Keep `/`
+  and `/live` daytime. Node routes and Pages directory entries must stay aligned.
+- `public/js/countryside.js` — goat/palm builders (Moon only) and shared house
+  orientation. Daytime retains sheep/pines; house windows face the track in both skins.
+- `public/js/lanterns.js` / `moon-festival.js` — seeded Vietnamese paper lantern
+  meshes/carriers and moonlit scenery; no per-racer lights (five scenery lights).
 - `public/js/environment.js` — procedural world; `lanePoint(progress, lateral)` takes
   **meters from the centerline** (lane band is ±4.4; keep racers within ±3.3).
 - `public/js/rig.js` — canonical mobu measurements, egg-profile math (`radiusAt(y)`),

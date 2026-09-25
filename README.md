@@ -23,12 +23,27 @@ To bind only the Tailscale interface, set `HOST` to this machine's Tailscale IPv
 Inspect the reference-based character at http://localhost:3000/mobu-lab.html: turntable,
 smile slider, running and celebration poses, plus a seeded outfit preview.
 
-Open http://localhost:3000 for a complete private race in the current tab. Open http://localhost:3000/live in one tab per participant for the real-time multiplayer race. Tests:
+Open http://localhost:3000 for a complete private race in the current tab. Open http://localhost:3000/live in one tab per participant for the real-time multiplayer race.
+
+### Mid-Autumn Festival edition 🏮
+
+Open **http://localhost:3000/moon** (also `/moon/`) for a private **Tết Trung Thu** race:
+- A silver full moon, starry night, warm house windows, and swaying lantern garlands around the track and audience.
+- Goats and feathered coconut palms replace sheep and pines **only in the Moon edition**. House window facades face the track in both editions.
+- Land-racing Mobus keep their random clothes and carry seeded Vietnamese paper lanterns: star, bunny, rooster, fish, boat, pig, butterfly, Mobu, airplane, lotus, and dragon. Deep translucent paper sides reveal a warm inner glow, and the Mobu lantern has curved smiling lips.
+- Both courses get the night scenery; ducks and spectators do not carry lanterns.
+- Lantern 🏮 start buttons and mooncake 🥮 winner celebrations. The ordinary `/` and `/live` editions stay daytime.
+
+This is a client-side skin, not a new race type or multiplayer room. Direct entries and refreshes work on both the Node server and Cloudflare Pages; no Worker configuration changes are needed.
+
+Tests:
 
 ```bash
 pnpm test           # WebSocket protocol / race-logic integration test
 node tests/plan-check.mjs   # statistical check of pack pacing, drama, no stalls
 node tests/mobu-check.mjs   # headless mobu rig invariants (MOBU.md §10)
+node tests/moon-check.mjs   # seeded lantern shapes, carry poses, disposal, lighting budget
+node tests/scenery-check.mjs # track-facing houses, Moon-only goats/palms, grounded geometry
 node tests/surface-check.mjs # waves, buoyancy, duck wardrobe, foot contact, trail pools
 node tests/visitor-check.mjs # seeded visitor looks, planted feet, poses, mesh budget
 ```
@@ -130,6 +145,9 @@ cloudflare/worker.js   Cloudflare adapter: Durable Object + WebSocketPair around
 public/js/main.js      Route-aware private/live client control, UI, cameras, race rendering
 public/js/race-plan.js Shared offline race-plan and start-grid generator
 public/js/environment.js  Procedural cozy world (oval track, trees, houses, lights)
+public/js/moon-festival.js Mid-Autumn moon, stars, track and audience lantern canopies
+public/js/countryside.js Moon-only goat/palm builders and shared house-facing helper
+public/js/lanterns.js   Eleven seeded, framed paper lanterns and hand-held bamboo carrier
 public/js/surface.js   Shared wave sampler, tessellated lake, bounded wake/dust pools
 public/js/duck.js      Buoyant duck rig and swim/celebration poses
 public/js/duck-costumes.js  Eight seeded, fitted duck costume themes

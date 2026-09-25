@@ -675,6 +675,20 @@ body.live-race #joinBtn { margin-top: 2px; }
   .cam-btn { padding: 6px 4px; font-size: 12px; }
 }
 
+/* An optional festival skin: keep the familiar cream panels and chunky
+   controls, with plum, lacquer-red and moon-gold accents. */
+#editionLink { color: #875124; font-size: 13px; text-align: center; }
+body.moon-race { background: #17243d; color: #583348; }
+.moon-race .panel { border-color: #9e7047; box-shadow: 0 6px 0 #211b3980, 0 12px 32px #080c2859; }
+.moon-race #join.overlay.panel { background: #fff4df; border-color: #bf9053; }
+.moon-race #logo { color: #743a55; }
+.moon-race #subtitle { color: #8a5467; }
+.moon-race .btn-green { background: #ab4656; border-bottom-color: #713144; }
+.moon-race .btn-secondary { background: #dca74e; border-bottom-color: #a17436; }
+.moon-race input:focus, .moon-race textarea:focus, .moon-race select:focus { border-color: #ab4656; }
+.moon-race #congratsTitle { color: #ffe4a0; }
+.moon-race #editionLink { color: #8f4557; }
+
 /* Keep the race controls at their usable 170px width on very narrow phones.
    The spectator panel yields width instead of overlapping the controls. */
 @media (max-width: 380px) {

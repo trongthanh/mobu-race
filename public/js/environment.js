@@ -9,6 +9,8 @@
 
 import * as THREE from '../vendor/three.module.js';
 import { waterAt, createLakeGeometry } from './surface.js';
+import { addMoonSky, addFestivalLights } from './moon-festival.js';
+import { createGoat, createCoconutPalm, trackFacingYaw } from './countryside.js';
 
 // ---------- deterministic PRNG ----------
 function mulberry32(seed) {
@@ -55,6 +57,8 @@ function mistTexture() {
 
 export function createWorld(opts = {}) {
   const isLake = opts.raceType === 'lake';
+  const isMoon = opts.edition === 'moon';
+  const fogColor = isMoon ? 0x17243d : FOG;
   const trackScale = opts.trackScale || 1;
   const a = 26 * trackScale;
   const b = 15 * trackScale;
@@ -63,14 +67,15 @@ export function createWorld(opts = {}) {
 
   const scene = new THREE.Scene();
   const fogFar = a * 6.2 + 150;
-  scene.background = new THREE.Color(FOG);
-  scene.fog = new THREE.Fog(FOG, a * 1.4, fogFar);
+  scene.background = new THREE.Color(fogColor);
+  scene.fog = new THREE.Fog(fogColor, a * 1.4, fogFar);
+  scene.userData.edition = isMoon ? 'moon' : 'classic';
 
   // ---------- lights ----------
-  const hemi = new THREE.HemisphereLight(0xfff3d6, 0x7c9a4d, 0.9);
+  const hemi = new THREE.HemisphereLight(isMoon ? 0x9fbce9 : 0xfff3d6, isMoon ? 0x202139 : 0x7c9a4d, isMoon ? 0.65 : 0.9);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff2d9, 1.5);
-  sun.position.set(a * 1.2, 42, -b);
+  const sun = new THREE.DirectionalLight(isMoon ? 0xcbdcff : 0xfff2d9, isMoon ? 1.15 : 1.5);
+  sun.position.set(isMoon ? -a * 1.2 : a * 1.2, 42, isMoon ? -a * 2.2 : -b);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const span = a * 3.2;
@@ -82,7 +87,7 @@ export function createWorld(opts = {}) {
   sun.shadow.camera.far = a * 6;
   sun.shadow.bias = -0.0005;
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.22));
+  scene.add(new THREE.AmbientLight(isMoon ? 0x8b9fdb : 0xffffff, isMoon ? 0.14 : 0.22));
 
   // ---------- valley terrain ----------
   // Height field shared by the terrain mesh AND scenery placement: flat
@@ -117,9 +122,9 @@ export function createWorld(opts = {}) {
   const RINGS = 110, SEGS = 96;
   {
     const pos = [], col = [], idx = [];
-    const cGrassA = new THREE.Color(0x66b13b);
-    const cGrassB = new THREE.Color(0x8ccd55);
-    const cSage = new THREE.Color(0xa8bf68); // drier tint up the slopes
+    const cGrassA = new THREE.Color(isMoon ? 0x24464a : 0x66b13b);
+    const cGrassB = new THREE.Color(isMoon ? 0x3d6364 : 0x8ccd55);
+    const cSage = new THREE.Color(isMoon ? 0x39465c : 0xa8bf68); // drier tint up the slopes
     const tmpC = new THREE.Color();
     for (let i = 0; i <= RINGS; i++) {
       const t = i / RINGS;
@@ -163,8 +168,8 @@ export function createWorld(opts = {}) {
     const geo = new THREE.SphereGeometry(1, 32, 18);
     const posAttr = geo.attributes.position;
     const col = [];
-    const horizon = new THREE.Color(FOG);
-    const zenith = new THREE.Color(SKY_ZENITH);
+    const horizon = new THREE.Color(fogColor);
+    const zenith = new THREE.Color(isMoon ? 0x050b24 : SKY_ZENITH);
     const tmpC = new THREE.Color();
     for (let i = 0; i < posAttr.count; i++) {
       const t = THREE.MathUtils.clamp((posAttr.getY(i) + 0.06) / 0.85, 0, 1);
@@ -180,6 +185,8 @@ export function createWorld(opts = {}) {
     scene.add(sky);
   }
 
+  if (isMoon) addMoonSky(scene, maxR);
+
   const group = new THREE.Group();
   scene.add(group);
 
@@ -192,7 +199,7 @@ export function createWorld(opts = {}) {
   const floaters = [];
 
   // lighter grass patches on the apron
-  const patchMat = stdMat(0x7ecb45);
+  const patchMat = stdMat(isMoon ? 0x35594f : 0x7ecb45);
   const patchGeo = new THREE.CircleGeometry(1, 16);
   for (let i = 0; i < 14; i++) {
     const p = new THREE.Mesh(patchGeo, patchMat);
@@ -508,11 +515,11 @@ export function createWorld(opts = {}) {
   fabric.castShadow = true;
   group.add(fabric);
   // banner lettering on both large faces of the fabric (the ±X sides racers
-  // approach from). Canvas texture like the name sprites, justified letter
-  // spacing so the line fills the face; redrawn once Reddit Sans has loaded.
-  const bannerText = 'Mobu Amazing Race';
+  // approach from). Fit within the text's own rectangle, leaving the mascot
+  // untouched; remeasure when Reddit Sans replaces the fallback font.
+  const bannerText = isMoon ? 'Mid-Autumn Race' : 'Mobu Amazing Race';
   const bFontSize = 100;
-  const bFont = `800 ${bFontSize}px 'Reddit Sans', 'Trebuchet MS', sans-serif`;
+  const bannerFont = (size) => `800 ${size}px 'Reddit Sans', 'Trebuchet MS', sans-serif`;
   const bannerTextH = 1.06;
   // Leave room for the supplied mobu mark on the left side of each banner face.
   const bannerImageW = 1.0;
@@ -522,42 +529,33 @@ export function createWorld(opts = {}) {
   const bannerImageZ = stripeZ - halfW + 0.3 + bannerImageW / 2;
   const bc = document.createElement('canvas');
   const bctx = bc.getContext('2d');
-  bctx.font = bFont;
-  const bChars = [...bannerText];
-  const bWidths = bChars.map((ch) => bctx.measureText(ch).width);
-  let bAsc = 0, bDesc = 0;
-  for (const ch of bChars) {
-    const m = bctx.measureText(ch);
-    bAsc = Math.max(bAsc, m.actualBoundingBoxAscent ?? bFontSize * 0.75);
-    bDesc = Math.max(bDesc, m.actualBoundingBoxDescent ?? bFontSize * 0.25);
-  }
-  bc.height = Math.ceil(bAsc + bDesc) + 26;
+  bc.height = 128;
   bc.width = Math.round(bc.height * (bannerTextW / bannerTextH));
-  const bGap = Math.max(2, (bc.width - 32 - bWidths.reduce((s, w) => s + w, 0)) / (bChars.length - 1));
-  const bTotalW = bWidths.reduce((s, w) => s + w, 0) + bGap * (bChars.length - 1);
   const bannerTex = new THREE.CanvasTexture(bc);
   bannerTex.colorSpace = THREE.SRGBColorSpace;
   bannerTex.anisotropy = 4;
   function drawBannerText() {
     bctx.clearRect(0, 0, bc.width, bc.height);
-    bctx.font = bFont;
-    bctx.textAlign = 'left';
+    bctx.font = bannerFont(bFontSize);
+    bctx.textAlign = 'center';
     bctx.textBaseline = 'alphabetic';
+    const metrics = bctx.measureText(bannerText);
+    const ascent = metrics.actualBoundingBoxAscent ?? bFontSize * 0.75;
+    const descent = metrics.actualBoundingBoxDescent ?? bFontSize * 0.25;
+    // Insets include the thick outline. Uniform scaling preserves the font's
+    // proportions instead of squeezing letters or imposing a minimum gap.
+    const fit = Math.min(1, (bc.width - 32) / Math.max(1, metrics.width),
+      (bc.height - 26) / Math.max(1, ascent + descent));
+    bctx.font = bannerFont(bFontSize * fit);
+    const fitted = bctx.measureText(bannerText);
     bctx.lineJoin = 'round';
     bctx.lineWidth = 11;
     bctx.strokeStyle = '#5f2a1d';
     bctx.fillStyle = '#fff4e0';
-    const y = bc.height / 2 + (bAsc - bDesc) / 2;
-    let x = (bc.width - bTotalW) / 2;
-    for (let i = 0; i < bChars.length; i++) {
-      bctx.strokeText(bChars[i], x, y);
-      x += bWidths[i] + bGap;
-    }
-    x = (bc.width - bTotalW) / 2;
-    for (let i = 0; i < bChars.length; i++) {
-      bctx.fillText(bChars[i], x, y);
-      x += bWidths[i] + bGap;
-    }
+    const y = bc.height / 2 + ((fitted.actualBoundingBoxAscent ?? ascent * fit)
+      - (fitted.actualBoundingBoxDescent ?? descent * fit)) / 2;
+    bctx.strokeText(bannerText, bc.width / 2, y);
+    bctx.fillText(bannerText, bc.width / 2, y);
     bannerTex.needsUpdate = true;
   }
   drawBannerText();
@@ -629,6 +627,7 @@ export function createWorld(opts = {}) {
 
   function pineTree(s) {
     const g = new THREE.Group();
+    g.name = 'countryside-pine';
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * s, 0.25 * s, 0.9 * s, 7), stdMat(0x7a4b2a));
     trunk.position.y = 0.45 * s;
     g.add(trunk);
@@ -687,8 +686,9 @@ export function createWorld(opts = {}) {
     group.add(b);
   }
 
-  function house(x, z, rotY, roofColor, scale = 1) {
+  function house(x, z, roofColor, scale = 1) {
     const g = new THREE.Group();
+    g.name = 'countryside-house';
     const body = new THREE.Mesh(new THREE.BoxGeometry(3.6 * scale, 2.2 * scale, 3 * scale), stdMat(0xfff1d6));
     body.position.y = 1.1 * scale;
     body.castShadow = true; body.receiveShadow = true;
@@ -706,12 +706,29 @@ export function createWorld(opts = {}) {
     door.position.set(0, 0.6 * scale, 1.52 * scale);
     g.add(door);
     for (const wx of [-1.1, 1.1]) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.6 * scale, 0.6 * scale, 0.08), stdMat(0x9adcf5));
+      const windowMat = isMoon
+        ? stdMat(0xffd486, { emissive: 0xffb64f, emissiveIntensity: 1.5 })
+        : stdMat(0x9adcf5);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.6 * scale, 0.6 * scale, 0.08), windowMat);
       win.position.set(wx * scale, 1.3 * scale, 1.52 * scale);
       g.add(win);
+      if (isMoon) {
+        win.name = 'festival-lit-window';
+        // Crossbars make the glowing windows read as cosy occupied houses.
+        for (const [w,h] of [[0.64,0.055],[0.055,0.64]]) {
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(w*scale,h*scale,0.04),stdMat(0x76533c));
+          bar.position.set(wx*scale,1.3*scale,1.58*scale); g.add(bar);
+        }
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(1,20),new THREE.MeshBasicMaterial({
+          color:0xffb85b, transparent:true, opacity:0.12, depthWrite:false,
+        }));
+        pool.rotation.x = -Math.PI/2;
+        pool.scale.set(0.85*scale,1.6*scale,1);
+        pool.position.set(wx*scale,0.065,2.3*scale); g.add(pool);
+      }
     }
     g.position.set(x, groundHeight(x, z) - 0.05, z);
-    g.rotation.y = rotY;
+    g.rotation.y = trackFacingYaw(x, z);
     group.add(g);
   }
 
@@ -783,8 +800,17 @@ export function createWorld(opts = {}) {
     group.add(g);
   }
 
+  function grazingAnimal(x, z) {
+    if (!isMoon) { sheep(x, z); return; }
+    const goat = createGoat();
+    goat.position.set(x, groundHeight(x, z), z);
+    goat.rotation.y = rand() * Math.PI * 2;
+    group.add(goat);
+  }
+
   function sheep(x, z) {
     const g = new THREE.Group();
+    g.name = 'countryside-sheep';
     const wool = stdMat(0xf3eee3, { roughness: 1 });
     const dark = stdMat(0x4a4038);
     const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), wool);
@@ -1031,7 +1057,8 @@ export function createWorld(opts = {}) {
     if (!canSit(x, z)) continue;
     const s = 0.9 + rand() * 1.3;
     const kind = rand();
-    const tree = kind < 0.4 ? pineTree(s) : kind < 0.78 ? blobTree(s) : roundTree(s);
+    const tree = kind < 0.4 ? (isMoon ? createCoconutPalm(s) : pineTree(s))
+      : kind < 0.78 ? blobTree(s) : roundTree(s);
     tree.position.set(x, groundHeight(x, z) - 0.05, z);
     tree.rotation.y = rand() * Math.PI * 2;
     group.add(tree);
@@ -1049,15 +1076,15 @@ export function createWorld(opts = {}) {
   }
 
   // --- two cottages near the race; the rest are distant valley homes ---
-  house(-a * 1.35, -b * 1.5, 0.5, 0xd32f2f, 1.85); // red roof, near the start
+  house(-a * 1.35, -b * 1.5, 0xd32f2f, 1.85); // red roof, near the start
   // The 10s oval shrinks beneath this cottage's fixed-size footprint. Keep it
   // beyond the outer edge so it cannot appear inside the opposite side of the ring.
   const oppositeHouseZ = -Math.max(b * 1.95, outerB + 5.6);
-  house(a * 0.2, oppositeHouseZ, 0.1, 0x7cb342, 1.7); // green roof, near the road
-  house(a * 2.6, -b * 2.6, -0.8, 0x1976d2, 1.65);  // distant blue roof
-  house(a * 2.35, b * 2.5, 2.4, 0xf57c00, 1.75);   // distant orange roof
-  house(-a * 2.7, b * 2.2, -0.4, 0x1976d2, 1.55); // distant blue roof
-  house(a * 1.3, b * 3.1, 3.0, 0xf57c00, 1.55);    // distant orange roof
+  house(a * 0.2, oppositeHouseZ, 0x7cb342, 1.7); // green roof, near the road
+  house(a * 2.6, -b * 2.6, 0x1976d2, 1.65);  // distant blue roof
+  house(a * 2.35, b * 2.5, 0xf57c00, 1.75);   // distant orange roof
+  house(-a * 2.7, b * 2.2, 0x1976d2, 1.55); // distant blue roof
+  house(a * 1.3, b * 3.1, 0xf57c00, 1.55);    // distant orange roof
 
   // --- fence arcs near the track ---
   fenceArc(0, 0, -0.35, 0.45, outerA + 3.5, 7);
@@ -1076,7 +1103,7 @@ export function createWorld(opts = {}) {
     const e = 1.25 + rand() * 1.15;
     const { x, z } = spotOnSlope(ang, e);
     if (!canSit(x, z)) continue;
-    sheep(x, z);
+    grazingAnimal(x, z);
     i++;
   }
   for (const [x, z] of [
@@ -1121,7 +1148,7 @@ export function createWorld(opts = {}) {
     // dirt lane even when the 10s course is at its smallest scale.
     for (const [fx, fz] of [
       [-0.55, -0.38], [-0.18, 0.28], [0.02, -0.42],
-    ]) sheep(fx * innerA, fz * innerB);
+    ]) grazingAnimal(fx * innerA, fz * innerB);
     for (const [fx, fz] of [
       [0.24, 0.08], [0.38, -0.24],
     ]) pig(fx * innerA, fz * innerB);
@@ -1134,7 +1161,7 @@ export function createWorld(opts = {}) {
 
   // The derby already has natural lotus lane markers; keep the colourful
   // racing bunting for the land course so it cannot be mistaken for buoys.
-  if (!isLake) {
+  if (!isLake && !isMoon) {
     const poleTopY = 4;
     const poleZN = stripeZ - halfW;
     const poleZS = stripeZ + halfW;
@@ -1153,11 +1180,14 @@ export function createWorld(opts = {}) {
     }
   }
 
+  const animateFestival = isMoon
+    ? addFestivalLights(group, { lanePoint, groundHeight, outerZ }) : null;
+
   // --- the road north, fading into the fog ---
   buildPathRibbon(pathPts, 3, 0xcdb083);
 
   // --- clouds ---
-  const cloudMat = stdMat(0xffffff, { roughness: 1, flatShading: false });
+  const cloudMat = stdMat(isMoon ? 0x52617d : 0xffffff, { roughness: 1, flatShading: false });
   const cloudGeo = new THREE.SphereGeometry(1, 10, 8);
   for (let i = 0; i < 8; i++) {
     const c = new THREE.Group();
@@ -1181,7 +1211,8 @@ export function createWorld(opts = {}) {
   for (let i = 0; i < 12; i++) {
     const mat = new THREE.SpriteMaterial({
       map: mistTex, transparent: true, depthWrite: false,
-      opacity: 0.16 + rand() * 0.14,
+      color: isMoon ? 0x718bb0 : 0xffffff,
+      opacity: (isMoon ? 0.05 : 0.16) + rand() * (isMoon ? 0.04 : 0.14),
     });
     const sp = new THREE.Sprite(mat);
     const ang = rand() * Math.PI * 2;
@@ -1196,6 +1227,7 @@ export function createWorld(opts = {}) {
 
   // ---------- gentle life: wind, mist, clouds ----------
   function animate(t) {
+    if (animateFestival) animateFestival(t);
     for (const h of spinners) h.rotation.z = t * 0.85;
     for (const m of mists) m.sp.position.x = m.x + Math.sin(t * 0.02 + m.i * 1.7) * 4;
     for (const c of clouds) c.g.position.x = c.x + Math.sin(t * 0.008 + c.i * 2.1) * 7;
